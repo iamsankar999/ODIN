@@ -510,22 +510,24 @@ echo.
 echo  Waiting for ODIN server to stop...
 :wait_loop
 timeout /t 1 /nobreak >nul
-netstat -aon 2>nul | findstr ":8000 " >nul 2>&1
+netstat -aon 2>nul | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
 if not errorlevel 1 goto wait_loop
 echo  Server stopped.
+timeout /t 1 /nobreak >nul
+
+cd /d "{PROJECT_ROOT}"
 
 :: Copy new files over old ones
 :: Exclude: python-embed, .env, _update_staging, _apply_update.bat
 echo  Copying updated files...
-xcopy "{source_root}\\*" "{PROJECT_ROOT}\\" /s /y /q /exclude:{staging_dir}\\xcopy_exclude.txt >nul 2>&1
+xcopy "{source_root}\\*" .\\ /s /y /q /exclude:_update_staging\\xcopy_exclude.txt >nul 2>&1
 
 :: Delete the packages sentinel so any new requirements get installed
-if exist "{PROJECT_ROOT}\\python-embed\\.packages_ok" del /q "{PROJECT_ROOT}\\python-embed\\.packages_ok"
+if exist "python-embed\\.packages_ok" del /q "python-embed\\.packages_ok"
 
 :: Clean up staging
 echo  Cleaning up...
-rmdir /s /q "{staging_dir}" 2>nul
-del /q "{zip_path}" 2>nul
+rmdir /s /q "_update_staging" 2>nul
 
 echo.
 echo  Update applied successfully!
@@ -533,7 +535,7 @@ echo  Restarting ODIN...
 echo.
 
 :: Relaunch ODIN
-start "" "{odin_launch}"
+start "" "ODIN_Launch.bat"
 
 :: Self-delete this batch file
 (goto) 2>nul & del "%~f0"
