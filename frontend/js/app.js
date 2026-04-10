@@ -1972,6 +1972,11 @@ function renderMapElements(place) {
             // Now draw lines to ALL suggestions from this plaza
             place.suggestions.forEach(s => {
                 const dist = calculateHaversine(p.pos.lat, p.pos.lng, s.lat, s.lng);
+                
+                // Store distance locally on suggestion for the Popup UI
+                s.plazaDistances = s.plazaDistances || [];
+                s.plazaDistances.push({ plaza: p.name, distance: dist });
+
                 const isClosestForThisPlaza = (s === closestSugForThisPlaza);
                 
                 let color = '#4285F4'; // Default Blue
@@ -1989,12 +1994,12 @@ function renderMapElements(place) {
                     }
                 }
 
-                drawMapLine(p.pos, { lat: s.lat, lng: s.lng }, color, weight, zIndex, `${dist} km`);
+                drawMapLine(p.pos, { lat: s.lat, lng: s.lng }, color, weight, zIndex);
             });
         });
     }
 
-    function drawMapLine(p1, p2, color, weight, zIndex, distText) {
+    function drawMapLine(p1, p2, color, weight, zIndex) {
         const line = new google.maps.Polyline({
             path: [p1, p2],
             geodesic: true,
@@ -2005,19 +2010,7 @@ function renderMapElements(place) {
             map: map
         });
 
-        // distance label placed near the suggestion (85% towards the suggestion)
-        const labelLat = p1.lat * 0.15 + p2.lat * 0.85;
-        const labelLng = p1.lng * 0.15 + p2.lng * 0.85;
-
-        const labelMarker = new google.maps.Marker({
-            position: { lat: labelLat, lng: labelLng },
-            map: map,
-            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 },
-            label: { text: distText, color: "white", className: "distance-label", fontSize: "10px" },
-            zIndex: zIndex + 1
-        });
-
-        lines.push({ line, label: labelMarker });
+        lines.push({ line });
     }
 
     if (hasValidPoints) {
@@ -2213,10 +2206,18 @@ async function renderCurrentPlace() {
                     const resolvedFor = resolvedPlaces[place.original_name] || {};
                     const unresolvedPlazas = plazas.filter(p => !resolvedFor[p] && !resolvedFor["__all__"]);
 
+                    const distHtml = (s.plazaDistances || []).map(pd => 
+                        `<div style="font-size:12px;margin-bottom:4px;">📍 <strong>${pd.distance} km</strong> from ${pd.plaza}</div>`
+                    ).join('') || (s.dist_km != null ? `<div style="font-size:12px;margin-bottom:4px;">📍 Distance: <strong>${s.dist_km} km</strong></div>` : '');
+
                     content.innerHTML = `
                         <div style="font-weight:bold;font-size:14px;margin-bottom:4px;border-bottom:1px solid #eee;padding-bottom:5px;">${s.name}</div>
                         ${s.formatted_address ? `<div style="font-size:11px;color:#555;margin-bottom:8px;">📌 ${s.formatted_address}</div>` : ''}
-                        ${s.dist_km != null ? `<div style="font-size:12px;margin-bottom:4px;">📍 Distance: <strong>${s.dist_km} km</strong></div>` : ''}
+                        
+                        <div style="margin-bottom:8px; line-height: 1.4;">
+                            ${distHtml}
+                        </div>
+
                         ${s.zone ? `<div style="font-size:12px;margin-bottom:10px;">🗺️ Zone: <strong>${s.zone}</strong></div>` : ''}
                         
                         <div style="margin-bottom:12px;">
