@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140" style="overflow: visible;">
+  <defs>
+    <linearGradient id="grad-dark" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#164e64;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1a5f7a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#164e64;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-light" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#9bc4d1;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#add8e6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#9bc4d1;stop-opacity:1" />
+    </linearGradient>
+    <style>
+      .logo-container {
+        perspective: 1000px;
+      }
+      .pin-outer {
+        fill: #000000;
+        stroke: #000000;
+        stroke-width: 1;
+      }
+      .triangle-hole {
+        fill: #ffffff;
+      }
+      /* Axis of rotation must be center of the circles (50, 50) */
+      .dark-blue-body {
+        fill: url(#grad-dark);
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: flip-cw 6s ease-in-out infinite;
+      }
+      .inner-circle {
+        fill: url(#grad-light);
+      }
+      @keyframes flip-cw {
+        0% { transform: rotateY(0deg); }
+        50% { transform: rotateY(180deg); }
+        100% { transform: rotateY(360deg); }
+      }
+      @keyframes flip-acw {
+        0% { transform: rotateY(0deg); }
+        50% { transform: rotateY(-180deg); }
+        100% { transform: rotateY(-360deg); }
+      }
+    </style>
+  </defs>
+  <g class="logo-container">
+    <!-- 1. Black Pin Body (60 degree tip) -->
+    <!-- Tangent points at Q_L(15.36, 70), Q_R(84.64, 70), Tip P(50, 130) -->
+    <path class="pin-outer" d="M 15.36 70 A 40 40 0 1 1 84.64 70 L 50 130 Z" />
+    
+    <!-- 2. Refined White Cutout (Wedge with curved top) -->
+    <!-- Parallel to 60deg tangents | 4px spacing from dark blue circle -->
+    <path class="triangle-hole" d="M 27.55 83.1 A 40 40 0 0 0 72.45 83.1 L 50 122 Z" />
+
+    <!-- 3. Dark Blue Circle (Gapless) | Center 50, 50 | Radius 36 -->
+    <circle class="dark-blue-body" cx="50" cy="50" r="36" />
+    
+    <!-- 4. Inner Light Blue Semicircle (Visible Rotation) | Center 50, 50 | Radius 24 -->
+    <path class="inner-circle" d="M 50 26 A 24 24 0 0 1 50 74 L 50 26 Z" />
+  </g>
+</svg>

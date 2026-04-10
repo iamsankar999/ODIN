@@ -1,0 +1,39 @@
+# =============================================================================
+# ODIN (Origin-Destination Intelligent Navigator) - Backend Dependencies
+# =============================================================================
+# Install:  pip install -r requirements.txt
+# Python:   3.10+
+# =============================================================================
+
+# ---------- Web Framework & Server ----------
+fastapi==0.115.0
+uvicorn==0.30.6
+python-multipart==0.0.12         # File-upload support for FastAPI
+aiofiles==23.2.1                 # Async file I/O required by FastAPI StaticFiles
+pydantic==2.9.2                  # Data validation core
+pydantic-settings==2.5.2         # Settings management via .env
+
+# ---------- Data Processing ----------
+pandas==2.2.2
+openpyxl==3.1.5                  # Excel (.xlsx) read/write engine
+numpy==1.26.4                    # Numerical operations (stable for pandas 2.x)
+
+# ---------- Geospatial ----------
+geopandas==1.0.1
+shapely==2.0.6                   # Geometry operations (Point-in-Polygon, etc.)
+fiona==1.10.1                    # Shapefile I/O backend for GeoPandas
+pyproj==3.6.1                    # Coordinate-reference-system transformations
+
+# ---------- Fuzzy / Phonetic Matching ----------
+thefuzz==0.22.1                  # Fuzzy string matching (fork of fuzzywuzzy)
+python-Levenshtein==0.26.0       # C-accelerated Levenshtein distance
+RapidFuzz==3.10.0                # Fast fuzzy matching engine
+phonetics==1.0.5                 # Double-Metaphone phonetic codes
+
+# ---------- Google Maps Integration ----------
+googlemaps==4.10.0               # Geocoding & Places API client
+requests==2.32.3                 # HTTP requests (googlemaps dependency)
+
+# ---------- Environment & Config ----------
+python-dotenv==1.0.1             # Load .env files (API keys, secrets)
+packaging>=23.0                  # PEP-440 version comparison for auto-update

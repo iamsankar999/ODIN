@@ -1,0 +1,42 @@
+# =============================================================================
+# OD Place-Name Validation System - Project Dependencies
+# =============================================================================
+# Quick Setup on a new machine:
+#   1. python -m venv venv
+#   2. venv\Scripts\activate          (Windows)
+#      source venv/bin/activate       (Linux/Mac)
+#   3. pip install -r requirements.txt
+#   4. Copy .env file with your GOOGLE_MAPS_API_KEY into backend/
+#   5. cd backend && uvicorn app.main:app --reload
+# =============================================================================
+
+# ---------- Web Framework & Server ----------
+fastapi==0.103.1
+uvicorn==0.23.2
+python-multipart==0.0.6          # File-upload support for FastAPI
+aiofiles==23.2.1                 # Async file I/O for StaticFiles (FastAPI)
+
+# ---------- Data Processing ----------
+pandas==2.1.0
+openpyxl==3.1.2                  # Excel (.xlsx) read/write engine
+numpy==1.26.4                    # Numerical operations (pandas dependency)
+
+# ---------- Geospatial ----------
+geopandas==0.14.0
+shapely==2.1.2                   # Geometry operations (Point-in-Polygon, etc.)
+fiona==1.9.5                     # Shapefile I/O backend for GeoPandas
+pyproj==3.7.2                    # Coordinate-reference-system transformations
+
+# ---------- Fuzzy / Phonetic Matching ----------
+thefuzz==0.22.1                  # Fuzzy string matching (fork of fuzzywuzzy)
+python-Levenshtein==0.21.1       # C-accelerated Levenshtein distance
+RapidFuzz==3.14.3                # Fast fuzzy matching engine (thefuzz backend)
+phonetics==1.0.5                 # Double-Metaphone phonetic codes
+
+# ---------- Google Maps Integration ----------
+googlemaps==4.10.0               # Geocoding & Places API client
+requests==2.32.5                 # HTTP requests (googlemaps dependency)
+
+# ---------- Environment & Config ----------
+python-dotenv==1.2.2             # Load .env files (API keys, secrets)
+packaging>=23.0                  # PEP-440 version comparison for auto-update

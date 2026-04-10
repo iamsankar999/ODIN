@@ -1,0 +1,33 @@
+# ── Embedded Python runtime (auto-downloaded by ODIN_Launch.bat) ──────────────
+python-embed/
+
+# ── Virtual environments (legacy, replaced by python-embed) ───────────────────
+venv/
+backend/venv/
+.venv/
+
+# ── Python build artefacts ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# ── Environment / Secrets ─────────────────────────────────────────────────────
+# Keep .env in source control ONLY if you scrub the API key first.
+# Uncomment the line below to exclude it entirely:
+# backend/.env
+
+# ── Auto-Update staging (generated at runtime) ───────────────────────────────
+_update_staging/
+_apply_update.bat

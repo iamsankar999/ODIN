@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OD Place-Name Validation System</title>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css?v=1.3">
+</head>
+
+<body>
+    <!-- Intro View -->
+    <div id="view-intro" class="app-view active">
+        <!-- ── Update Notification Banner ── -->
+        <div id="update-banner" class="update-banner" style="display: none;">
+            <div class="update-banner-inner">
+                <div class="update-banner-left">
+                    <span class="update-pulse-dot"></span>
+                    <div class="update-banner-text">
+                        <span class="update-headline">
+                            New version available: <strong id="update-version-tag">—</strong>
+                        </span>
+                        <span class="update-subline" id="update-release-notes"></span>
+                    </div>
+                </div>
+                <div class="update-banner-actions">
+                    <button class="btn btn-update-now" id="btn-update-now" onclick="triggerUpdate()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Update Now
+                    </button>
+                    <button class="update-dismiss-btn" onclick="dismissUpdateBanner()" title="Dismiss">✕</button>
+                </div>
+            </div>
+        </div>
+        <div class="wizard-page">
+            <div class="wizard-card" style="text-align: center;">
+                <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
+                <h1 class="intro-title">ODIN</h1>
+                <p class="intro-subtitle">Origin-Destination Insight Navigator</p>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
+                    <button class="btn btn-primary btn-wizard" onclick="switchView('view-mode-selection')" style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                            <line x1="12" y1="2" x2="12" y2="12"></line>
+                        </svg>
+                        Launch
+                    </button>
+                    <button class="btn btn-outline" id="resume-btn" onclick="resumeSession()"
+                        style="display: none; width: 280px; border-color: #4ade80; color: #4ade80;">
+                        Resume Last Session
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup View (Formerly Onboarding) -->
+    <div id="view-setup" class="app-view">
+        <div class="wizard-page">
+            <div class="wizard-card">
+                <div class="wizard-header" style="display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; width: 100%; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <img src="assets/logo.svg" alt="Int-OD Logo" class="wizard-logo" style="margin:0; width:32px; height:32px;">
+                        <h1 class="wizard-title" style="margin:0; font-size: 1.5rem;">ODIN</h1>
+                    </div>
+                    <div style="text-align: center;">
+                        <p class="wizard-subtitle" id="setup-subtitle" style="margin:0; font-size: 1.2rem; font-weight: 600; color: var(--accent);">Project Setup</p>
+                    </div>
+                    <div></div> <!-- Spacer for symmetry -->
+                </div>
+
+                <div class="onboarding-grid" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem; align-items: start;">
+                    <!-- Project Selection Column -->
+                    <div class="setup-column-left" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <!-- New Project Section -->
+                        <div id="panel-new-project" class="onboarding-card" style="margin:0;">
+                            <h4>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 0 0 1-2 2H5a2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                New Project
+                            </h4>
+                            <div style="display: flex; gap: 1rem;">
+                                <label for="wizard-shapefile-upload" class="btn btn-sm btn-outline dataset-btn not-loaded"
+                                    id="wizard-shp-btn" style="flex: 1;">
+                                    Upload Shapefile
+                                    <input type="file" id="wizard-shapefile-upload" accept=".zip,.shp" style="display:none;"
+                                        onchange="handleWizardFileUpload(this, 'shp')">
+                                </label>
+                                <label for="wizard-od-upload" class="btn btn-sm btn-outline dataset-btn not-loaded"
+                                    id="wizard-od-btn" style="flex: 1;">
+                                    Upload OD Dataset
+                                    <input type="file" id="wizard-od-upload" accept=".csv,.xlsx" style="display:none;"
+                                        onchange="handleWizardFileUpload(this, 'od')">
+                                </label>
+                            </div>
+                            <div id="onboarding-files-status" class="onboarding-status" style="text-align: center; margin-top: 0.5rem;">
+                                <span id="status-shp" class="status-pending">●</span> Shapefile
+                                &nbsp;&nbsp;
+                                <span id="status-od" class="status-pending">●</span> OD Dataset
+                            </div>
+                        </div>
+
+                        <!-- Open Project Section -->
+                        <div id="panel-open-project" class="onboarding-card" style="margin:0;">
+                            <h4>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                                Open Project
+                            </h4>
+                            <button class="btn btn-sm btn-outline dataset-btn not-loaded" id="project-zip-btn" onclick="openProjectWithHandle()">
+                                Select Project ZIP
+                            </button>
+                            <input type="file" id="project-zip-upload" accept=".zip" style="display:none;"
+                                onchange="handleProjectZipUpload(this)">
+                            <div id="zip-status" class="onboarding-status" style="text-align: center; margin-top: 0.5rem;">
+                                <span id="status-zip" class="status-pending">●</span> No ZIP selected
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- User Setup Column -->
+                    <div class="setup-column-right">
+                        <div class="onboarding-card" style="height: 100%; display: flex; flex-direction: column;">
+                            <h4>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 2 0 0 0-4-4H5a4 2 0 0 0-4 4v2"></path>
+                                    <circle cx="9" cy="7" r="4"></circle>
+                                    <path d="M23 21v-2a4 2 0 0 0-3-3.87"></path>
+                                    <path d="M16 3.13a4 2 0 0 1 0 7.75"></path>
+                                </svg>
+                                User Setup
+                            </h4>
+                            <div style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
+                                <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
+                                <input type="number" id="wizard-user-count" class="user-count-input" value="1" min="1"
+                                    max="20" onchange="generateWizardUserInputs()">
+                            </div>
+                            <div id="wizard-user-names" class="custom-scroll" style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
+                                <!-- User inputs -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="wizard-footer">
+                    <button class="btn btn-outline" onclick="switchView('view-mode-selection')">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                        Back
+                    </button>
+                    <div id="wiz-start-container">
+                        <button id="wiz-start-btn" class="btn btn-primary btn-wizard" disabled
+                            onclick="startTask()">
+                            Next >>>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mode Selection View -->
+    <div id="view-mode-selection" class="app-view">
+        <div class="wizard-page">
+            <div class="wizard-card">
+                <div class="wizard-header">
+                    <img src="assets/logo.svg" alt="Int-OD Logo" class="wizard-logo">
+                    <h1 class="wizard-title">ODIN</h1>
+                    <p class="wizard-subtitle">Select Operation Mode</p>
+                </div>
+                
+                <p style="color:#94a3b8; margin-bottom:2rem; text-align: center;">Choose how you want to process the uploaded validation
+                    data.</p>
+                <div class="mode-btn-group">
+                    <div class="mode-card" onclick="selectModeForSetup('Zone assign')">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="3 11 11 3 21 11 11 19 3 11"></polygon>
+                        </svg>
+                        <h3>Zone assign</h3>
+                        <p class="mode-desc">assign zones to places from the field data</p>
+                    </div>
+                    <div class="mode-card" onclick="selectModeForSetup('Place assign')">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                        <h3>Place assign</h3>
+                        <p class="mode-desc">assign exact coordinates for a place inside an already assigned zone.</p>
+                    </div>
+                    <div class="mode-card" onclick="selectModeForSetup('Base number')">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="20" x2="12" y2="10"></line>
+                            <line x1="18" y1="20" x2="18" y2="4"></line>
+                            <line x1="6" y1="20" x2="6" y2="16"></line>
+                        </svg>
+                        <h3>Base number</h3>
+                        <p class="mode-desc">analytics & insights based on historical traffic data</p>
+                    </div>
+                    <div class="mode-card" onclick="alert('Review & Visualization: Coming soon!')">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <h3>Review & Visualization</h3>
+                        <p class="mode-desc">insights and review for pre computed data.</p>
+                    </div>
+                </div>
+                <!-- 2. Navigation -->
+                <div class="wizard-footer">
+                    <button class="btn btn-outline" onclick="switchView('view-intro')">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;">
+                            <line x1="19" y1="12" x2="5" y2="12"></line>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                        Back
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application View (Existing UI) -->
+    <div id="view-main" class="app-view">
+        <!-- Full Screen Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loading-text">Processing OD Data...</div>
+        </div>
+
+        <div class="app-container">
+            <!-- Header -->
+            <header class="app-header">
+                <!-- Group 1: Left (Above Analytical Pane - 30%) -->
+                <div class="header-section header-left">
+                    <img src="assets/logo.svg" alt="Int-OD Logo" class="header-logo">
+                    <div class="logo">
+                        <h1>ODIN</h1>
+                    </div>
+                    <div class="user-selector" id="user-selector-container">
+                        <div class="btn btn-sm btn-outline user-icon" onclick="toggleUserDropdown()" title="Select User">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            <span id="current-user-display" class="current-user-text">All Users</span> ▾
+                        </div>
+                        <div class="user-dropdown" id="user-dropdown"></div>
+                    </div>
+                    <div class="theme-toggle-ios">
+                        <input type="checkbox" id="theme-toggle" onchange="toggleTheme()">
+                        <label for="theme-toggle" class="toggle-track">
+                            <span class="toggle-thumb" id="toggle-thumb">🌙</span>
+                        </label>
+                    </div>
+                    <div class="mode-indicator" id="mode-indicator-container">
+                        <span id="current-mode-display" class="mode-text">Zone assign</span>
+                    </div>
+                </div>
+
+                <!-- Group 2: Center (Start of Map Pane - 70%) -->
+                <div class="header-section header-center">
+                    <button class="btn btn-sm btn-danger" onclick="showBackOptions()"
+                        style="background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #f87171;">Back</button>
+                    <button class="btn btn-sm btn-success" onclick="saveProgress()" title="Save Progress">Save</button>
+                    <button class="btn btn-sm btn-outline" onclick="downloadProgress()" title="Export">Export</button>
+                    
+                    <div class="manual-search-card">
+                        <input type="text" id="manual-search-input" placeholder="Search place..."
+                            style="flex: 1; min-width: 100px; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text-primary); font-size: 0.7rem; outline: none; height: 32px;">
+                        <button class="btn btn-sm btn-primary" onclick="manualTextSearch()">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="state-filter-selector" id="state-filter-container">
+                        <button class="btn btn-sm btn-outline filter-btn" id="state-filter-btn" onclick="toggleStateFilter()" title="Filter by State">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                            </svg>
+                            <span id="state-filter-label">State</span> ▾
+                        </button>
+                        <div class="state-dropdown" id="state-dropdown">
+                            <!-- States will be injected here -->
+                        </div>
+                    </div>
+
+                    <div class="manual-select-card">
+                        <button class="btn btn-sm btn-outline" onclick="manualMapSelect()" title="Pick from Map">+</button>
+                    </div>
+                </div>
+
+                <!-- Group 3: Right (Right and alignment) -->
+                <div class="header-section header-right" style="flex:1; display:flex; align-items:center; justify-content:flex-end; gap:0.75rem;">
+                    <div class="pending-badge-container" style="display: flex; align-items: center;">
+                        <span id="completion-progress" class="completion-badge" title="Overall OD Pair Validation Progress" style="margin-right: 0.5rem; background: rgba(34, 197, 94, 0.1); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.2); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500;">0%</span>
+                        <span id="unmatched-count" class="unmatched-count-badge">Pending: 0</span>
+                    </div>
+
+                    <div class="place-navigator">
+                        <button class="btn btn-sm btn-outline navigator-btn" id="prev-place" onclick="navigatePlace(-1)">&#8592;</button>
+                        <div class="navigator-info">
+                            <div class="current-place-display" id="selected-place-name">No data loaded</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline navigator-btn" id="next-place" onclick="navigatePlace(1)">&#8594;</button>
+                    </div>
+
+                    <div id="place-zone-tag" class="place-zone-tag" style="display: none;">
+                        <span class="zone-label">Zone</span>
+                        <span id="place-zone-display" class="zone-number">--</span>
+                    </div>
+
+                    <div class="review-selector" id="review-selector-container">
+                        <button class="btn btn-sm btn-outline review-btn" id="review-btn" onclick="toggleReviewDropdown()"
+                            style="min-width: 85px;">Review ▾</button>
+                        <div class="file-dropdown" id="review-dropdown"></div>
+                    </div>
+
+                    <div class="status-indicator" title="Backend Status">
+                        <span class="status-dot" id="system-dot"></span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Content Grid -->
+            <main class="main-content">
+                <!-- Left Pane: Analytics & Survey Mapping -->
+                <section class="pane left-pane split-pane">
+
+                    <!-- NEW: Survey Mapping View (Hidden by default) -->
+                    <div id="survey-mapping-pane"
+                        style="display: none; flex-direction: column; gap: 1rem; height: 100%;">
+                        <div class="analytics-card">
+                            <div class="card-header">
+                                <h3 style="margin: 0; font-size: 1.1rem; color: var(--primary);">Survey Location
+                                    Verification</h3>
+                            </div>
+                            <p class="text-muted" style="font-size: 0.85rem; margin-top: 5px;">Fix survey locations on
+                                the map before starting OD coding.</p>
+                        </div>
+
+                        <div id="plaza-mapping-list" class="flex-grow"
+                            style="overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 5px;">
+                            <!-- Dynamic Plaza Items will be injected here -->
+                        </div>
+
+                        <div style="padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                            <button class="btn btn-primary" onclick="confirmPlazaMapping()"
+                                style="width: 100%; padding: 0.85rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                                <!-- <span class="material-symbols-rounded" style="font-size: 20px;">task_alt</span> -->
+                                Confirm & Start OD Coding
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="standard-analytics-view"
+                        style="display: flex; flex-direction: column; gap: 1rem; height: 100%;">
+                        <!-- Mod 4.2 & 4.3: Vehicle Table moved into Left Pane -->
+                        <div class="analytics-card" id="vehicle-table-container">
+                            <div class="table-container">
+                                <table class="data-table small-table" id="vehicle-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="car-col">CAR</th>
+                                            <th>MB</th>
+                                            <th>GB</th>
+                                            <th>ML</th>
+                                            <th>LGV</th>
+                                            <th>2T</th>
+                                            <th>3T</th>
+                                            <th>4T</th>
+                                            <th>5T</th>
+                                            <th>6T</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="vehicle-body">
+                                        <tr class="empty-state">
+                                            <td colspan="10">Load data</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Top Left: Survey Location -->
+                        <div class="analytics-card">
+                            <div class="table-container">
+                                <table class="data-table small-table" id="plaza-table">
+                                    <thead>
+                                        <!-- Dynamic Headers -->
+                                        <tr>
+                                            <th>Waiting for data</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody style="border: none;">
+                                        <!-- Dynamic Body -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Left: Commodity Matrix -->
+                        <div class="analytics-card flex-grow" id="commodity-table-container">
+                            <div class="header-with-toggle">
+                                <h3 class="section-title">Commodity Matrix</h3>
+                                <div class="commodity-toggle">
+                                    <button id="toggle-abstract" class="toggle-btn active" onclick="switchCommodityView('abstract')">Abstract</button>
+                                    <button id="toggle-detailed" class="toggle-btn" onclick="switchCommodityView('detailed')">Detailed</button>
+                                </div>
+                            </div>
+                            <div class="table-container flex-grow-table">
+                                <table class="data-table small-table" id="commodity-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Commodity</th>
+                                            <th>ML</th>
+                                            <th>LGV</th>
+                                            <th>2T</th>
+                                            <th>3T</th>
+                                            <th>4T</th>
+                                            <th>5T</th>
+                                            <th>6T</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="commodity-body">
+                                        <!-- Dynamic Body -->
+                                        <tr class="empty-state">
+                                            <td colspan="8">Load data to view matrix</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                </section>
+
+                <!-- Right Pane: Map & Suggestions -->
+                <section class="pane right-pane">
+                    <div class="map-wrapper" id="map-wrapper">
+                        <div id="map" class="map-container">
+                            <div class="map-placeholder" id="map-placeholder">
+                                <p>Map will load here.</p>
+                            </div>
+                        </div>
+                        <!-- Suggestion List Sidebar Removed (Proximity lines on map used instead) -->
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- Libraries -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+        <!-- Custom JS -->
+        <script src="js/app.js?v=912"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script src="js/basenumber.js"></script>
+
+        <!-- Google Maps API (Placeholder for User Key) -->
+        <script
+            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBCPC5Eil9-BqMd7sgKEXt-p5O1MwgKDW0&callback=initMap&libraries=places&loading=async"
+            async defer></script>
+        <!-- User Management Modal -->
+        <div id="user-modal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>User Management & Work Distribution</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="user-count-ctrl">
+                        <span>Number of Users:</span>
+                        <input type="number" id="user-count" class="user-count-input" value="1" min="1" max="20"
+                            onchange="generateUserNameInputs()">
+                    </div>
+                    <div id="user-names-container">
+                        <!-- Dynamic inputs will be inserted here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeUserModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="applyUserAssignments()">Apply & Distribute Work</button>
+                </div>
+            </div>
+        </div>
+        <!-- Survey Location Modal -->
+        <div id="survey-modal" class="modal-overlay">
+            <div class="modal-content" style="width: 650px;">
+                <div class="modal-header">
+                    <h3>Survey Location Mapping</h3>
+                </div>
+                <div class="modal-body" id="survey-plaza-list">
+                    <!-- Plaza rows will be inserted here -->
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeSurveyModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="applyPlazaMapping()">Update Mapping</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Back Options Modal -->
+        <div id="back-modal" class="modal-overlay">
+            <div class="modal-content" style="width: 400px; text-align: center;">
+                <div class="modal-header">
+                    <h3>Exit Session?</h3>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom: 2rem; color: var(--text-secondary);">Choose how you would like to handle
+                        your current progress before leaving.</p>
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <button class="btn btn-primary" onclick="saveAndLeave()">Save and Leave</button>
+                        <button class="btn btn-outline" onclick="leaveWithoutSaving()"
+                            style="color: #ef4444; border-color: #ef4444;">Leave without Saving</button>
+                        <button class="btn btn-outline" onclick="closeBackModal()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Similarity Modal -->
+        <div id="similarity-modal" class="modal-overlay">
+            <div class="modal-content" style="width: 500px;">
+                <div class="modal-header">
+                    <h3>Similar Places Found</h3>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom: 1rem; color: var(--text-secondary); font-size: 14px;">
+                        You just assigned <strong id="similarity-modal-orig" style="color: var(--text-primary);"></strong> to Zone <strong id="similarity-modal-zone" style="color: var(--text-primary);"></strong>.<br/>
+                        Do you want to code the following similarly spelled places to the same zone?
+                    </p>
+                    <div id="similarity-modal-list" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px;">
+                        <!-- Dynamic content -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeSimilarityModal()">Done</button>
+                </div>
+            </div>
+        </div>
+        </div>
+
+    <!-- Base Number Mapping View -->
+    <div id="view-basenumber-mapping" class="app-view">
+        <div class="app-container" style="flex-direction: row; height: 100vh;">
+            <div class="left-panel" style="width: 40%; padding: 2rem; overflow-y: auto; background: var(--bg-panel); border-right: 1px solid var(--border);">
+                <img src="assets/logo.svg" alt="ODIN Logo" style="width: 40px; margin-bottom: 1rem;">
+                <h2>Map Survey Locations</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 2rem;">Map your survey locations to IHMCL Plaza names.</p>
+                <div id="basenumber-mapping-list" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <!-- Mapping rows dynamically populated here -->
+                </div>
+                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+                    <button class="btn btn-outline" onclick="switchView('view-mode-selection')">Back</button>
+                    <button class="btn btn-primary" onclick="proceedToBaseNumberAnalytics()">Proceed to Analytics</button>
+                </div>
+            </div>
+            <div class="right-panel" style="width: 60%; display: flex; align-items: center; justify-content: center; background: var(--bg-dark);">
+                <div style="text-align: center; color: var(--text-secondary);">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 1rem; opacity: 0.5;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 8v4l3 3"></path>
+                    </svg>
+                    <h3>Mapping Required</h3>
+                    <p>Please map or skip all survey locations to continue.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Base Number Analytics View -->
+    <div id="view-basenumber-analytics" class="app-view">
+        <div class="app-container" style="flex-direction: column; height: 100vh;">
+            <header class="app-header" style="justify-content: space-between;">
+                <div class="logo">
+                    <img src="assets/logo.svg" alt="Int-OD Logo" class="header-logo">
+                    <h1>ODIN <span style="font-weight: 300; font-size: 1rem;">| Base Number Analytics</span></h1>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-sm btn-outline" onclick="switchView('view-basenumber-mapping')">Back to Mapping</button>
+                </div>
+            </header>
+            
+            <div style="display: flex; flex: 1; overflow: hidden;">
+                <!-- Calculations Panel -->
+                <div style="width: 50%; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow-y: auto;">
+                    <!-- Plaza Selector Bar -->
+                    <div style="padding: 1rem; border-bottom: 1px solid var(--border); overflow-x: auto; white-space: nowrap; display: flex; gap: 0.5rem;" id="bn-plaza-selector">
+                        <!-- Plazas populated here -->
+                    </div>
+                    
+                    <div style="padding: 1.5rem; display: flex; flex-direction: column; gap: 2rem;">
+                        <!-- AADT Section -->
+                        <div>
+                            <h3 style="margin-bottom: 1rem;">Annual Average Daily Traffic (AADT)</h3>
+                            <div class="table-container" style="max-height: 200px; overflow-y: auto;">
+                                <table class="data-table" id="bn-aadt-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Select</th>
+                                            <th>FY</th>
+                                            <th>Car/Jeep</th>
+                                            <th>LCV</th>
+                                            <th>Bus/Truck</th>
+                                            <th>3Axle</th>
+                                            <th>MAV</th>
+                                            <th>OSV</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody><!-- populated dynamically --></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- SCF Section -->
+                        <div>
+                            <h3 style="margin-bottom: 1rem;">Seasonal Correction Factor (SCF)</h3>
+                            <div id="bn-month-selector" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                                <!-- Months populated dynamically Jan-Dec -->
+                            </div>
+                            <div class="table-container" style="max-height: 200px; overflow-y: auto;">
+                                <table class="data-table" id="bn-scf-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Select (Avg)</th>
+                                            <th>FY</th>
+                                            <th>Car/Jeep</th>
+                                            <th>LCV</th>
+                                            <th>Bus/Truck</th>
+                                            <th>3Axle</th>
+                                            <th>MAV</th>
+                                            <th>OSV</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody><!-- populated dynamically --></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Base Number Section -->
+                        <div>
+                            <h3 style="margin-bottom: 1rem;">Calculated Base Number</h3>
+                            <div class="table-container">
+                                <table class="data-table" id="bn-final-table">
+                                    <thead>
+                                        <tr>
+                                            <th>FY</th>
+                                            <th>Car/Jeep</th>
+                                            <th>LCV</th>
+                                            <th>Bus/Truck</th>
+                                            <th>3Axle</th>
+                                            <th>MAV</th>
+                                            <th>OSV</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr id="bn-final-row">
+                                            <td colspan="8" style="text-align: center; color: var(--text-secondary);">Select Plaza, FY, and Months to calculate.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Visualization Panel -->
+                <div style="width: 50%; display: flex; flex-direction: column; background: var(--bg-dark); padding: 1.5rem; overflow-y: auto;">
+                    <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; overflow-x: auto; white-space: nowrap; padding-bottom: 0.5rem;" id="bn-graph-plaza-selector">
+                        <!-- Multi-select plazas for graphs -->
+                    </div>
+                    <div style="background: var(--bg-panel); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; border: 1px solid var(--border);">
+                        <h4>Monthly Average Daily Traffic (MADT)</h4>
+                        <div style="height: 300px; width: 100%;">
+                            <canvas id="madtChart"></canvas>
+                        </div>
+                    </div>
+                    <div style="background: var(--bg-panel); border-radius: 12px; padding: 1rem; border: 1px solid var(--border);">
+                        <h4>Monthly Average Daily Revenue (MADR)</h4>
+                        <div style="height: 300px; width: 100%;">
+                            <canvas id="madrChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
