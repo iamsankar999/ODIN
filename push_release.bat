@@ -128,7 +128,7 @@ if not errorlevel 1 (
         echo  WARNING: gh release create failed. Create it manually on GitHub.
     )
 ) else (
-    echo  TIP: Install GitHub CLI (gh) to auto-create releases:
+    echo  TIP: Install GitHub CLI ^(gh^) to auto-create releases:
     echo       https://cli.github.com/
     echo.
     echo  Manual steps to create the release:

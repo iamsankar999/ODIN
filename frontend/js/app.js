@@ -49,8 +49,13 @@ const INDIAN_STATES = [
 
 // Removed MOCK_DATA
 
+window.hasGoogleMapsKey = false;
+window.googleMapsKey = "";
+window.mapsKeyPromise = null;
+
 document.addEventListener('DOMContentLoaded', () => {
-    checkGoogleMapsKey();
+    window.mapsKeyPromise = checkGoogleMapsKey();
+    initUI();
     checkForUpdates();  // Silent update check on launch
 });
 
@@ -65,18 +70,25 @@ async function checkGoogleMapsKey() {
             const data = await resp.json();
             if (data.has_key && data.key) {
                 // Key exists: dynamically inject Google Maps script
+                window.hasGoogleMapsKey = true;
+                window.googleMapsKey = data.key;
                 injectGoogleMapsScript(data.key);
-                initUI();
-            } else {
-                // No key: show Setup Modal
-                const overlay = document.getElementById('api-setup-overlay');
-                if (overlay) overlay.style.display = 'flex';
             }
         }
     } catch (e) {
         console.error("Failed to check Maps API Key status:", e);
-        const overlay = document.getElementById('api-setup-overlay');
-        if (overlay) overlay.style.display = 'flex';
+    }
+}
+
+async function handleLaunchClick() {
+    if (window.mapsKeyPromise) {
+        await window.mapsKeyPromise;
+    }
+    
+    if (window.hasGoogleMapsKey) {
+        switchView('view-mode-selection');
+    } else {
+        switchView('view-api-setup');
     }
 }
 
@@ -112,8 +124,11 @@ async function saveGoogleMapsKey() {
         
         const data = await resp.json();
         if (resp.ok) {
-            // Success! Reload the page to reboot the app with the new key in effect
-            window.location.reload();
+            // Success! Switch to the next view
+            window.hasGoogleMapsKey = true;
+            window.googleMapsKey = key;
+            injectGoogleMapsScript(key);
+            switchView('view-mode-selection');
         } else {
             throw new Error(data.detail || data.message || "Failed to save key.");
         }

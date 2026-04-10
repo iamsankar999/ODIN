@@ -48,7 +48,7 @@
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insight Navigator</p>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
-                    <button class="btn btn-primary btn-wizard" onclick="switchView('view-mode-selection')" style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                    <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()" style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
                             <line x1="12" y1="2" x2="12" y2="12"></line>
@@ -60,6 +60,31 @@
                         Resume Last Session
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Key Setup View -->
+    <div id="view-api-setup" class="app-view">
+        <div class="wizard-page">
+            <div class="wizard-card" style="text-align: center; max-width: 480px; padding: 2.5rem 2rem;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" style="margin-bottom:1.5rem;">
+                    <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <h2 style="font-size:1.5rem; margin-bottom: 0.5rem; font-weight:600;">Welcome to ODIN</h2>
+                <p style="color:var(--text-secondary); font-size:0.95rem; margin-bottom:1.5rem; line-height:1.5;">
+                    Please provide your Google Maps API Key to enable mapping, geocoding, and routing features. 
+                    Your key is stored securely on your local machine and never transmitted to our servers.
+                </p>
+                <input type="text" id="api-key-input" placeholder="AIzaSy..." 
+                    style="width: 100%; padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--border); 
+                    background: var(--bg-dark); color: var(--text-primary); font-family: monospace; font-size: 0.95rem; margin-bottom: 1.5rem;">
+                
+                <button id="btn-save-api" class="btn btn-primary" style="width: 100%; padding: 0.8rem; font-size: 1rem;" onclick="saveGoogleMapsKey()">
+                    Verify & Continue
+                </button>
+                <div id="api-save-error" style="color: var(--danger); font-size: 0.85rem; margin-top: 1rem; display: none;"></div>
             </div>
         </div>
     </div>
@@ -484,29 +509,6 @@
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script src="js/basenumber.js"></script>
 
-
-        <!-- ── API Key Setup Modal ── -->
-        <div id="api-setup-overlay" class="modal-overlay" style="display: none; z-index: 10000; background: var(--bg-dark);">
-            <div class="modal-content" style="max-width: 480px; text-align: center; border-color: rgba(59,130,246,0.3); padding: 2.5rem 2rem;">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" style="margin-bottom:1.5rem;">
-                    <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"></path>
-                    <circle cx="12" cy="10" r="3"></circle>
-                </svg>
-                <h2 style="font-size:1.5rem; margin-bottom: 0.5rem; font-weight:600;">Welcome to ODIN</h2>
-                <p style="color:var(--text-secondary); font-size:0.95rem; margin-bottom:1.5rem; line-height:1.5;">
-                    Please provide your Google Maps API Key to enable mapping, geocoding, and routing features. 
-                    Your key is stored securely on your local machine and never transmitted to our servers.
-                </p>
-                <input type="text" id="api-key-input" placeholder="AIzaSy..." 
-                    style="width: 100%; padding: 0.8rem 1rem; border-radius: 8px; border: 1px solid var(--border); 
-                    background: var(--bg-dark); color: var(--text-primary); font-family: monospace; font-size: 0.95rem; margin-bottom: 1.5rem;">
-                
-                <button id="btn-save-api" class="btn btn-primary" style="width: 100%; padding: 0.8rem; font-size: 1rem;" onclick="saveGoogleMapsKey()">
-                    Save & Launch ODIN
-                </button>
-                <div id="api-save-error" style="color: var(--danger); font-size: 0.85rem; margin-top: 1rem; display: none;"></div>
-            </div>
-        </div>
 
         <!-- User Management Modal -->
 
