@@ -301,6 +301,56 @@ async def api_add_place_to_database(payload: Dict[str, str] = Body(...)):
         
     return result
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CONFIGURATION ENDPOINTS (Google API Key)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import dotenv
+from pydantic import BaseModel
+
+class APIKeyPayload(BaseModel):
+    key: str
+
+@router.get("/config/maps-key")
+def get_maps_api_key():
+    """
+    Returns the Google Maps API key if available in the environment.
+    Safe for local desktop-app use.
+    """
+    import os
+    key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    return {"has_key": bool(key), "key": key}
+
+@router.post("/config/maps-key")
+def set_maps_api_key(payload: APIKeyPayload):
+    """
+    Saves the user-provided Google Maps API key to backend/.env and updates os.environ.
+    """
+    import os
+    from pathlib import Path
+    
+    key = payload.key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="API Key cannot be empty.")
+        
+    # Update current runtime environment
+    os.environ["GOOGLE_MAPS_API_KEY"] = key
+    
+    # Save to backend/.env
+    # We locate backend/.env relative to the project root
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+    backend_dir = PROJECT_ROOT / "backend"
+    env_file = backend_dir / ".env"
+    
+    if not env_file.exists():
+        # Create empty .env if it doesn't exist
+        env_file.write_text("", encoding="utf-8")
+        
+    # Python-dotenv helps properly quote and manage the .env file
+    dotenv.set_key(str(env_file), "GOOGLE_MAPS_API_KEY", key)
+    
+    return {"status": "success", "message": "API key successfully saved."}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  VERSION CHECK & SELF-UPDATE ENDPOINTS

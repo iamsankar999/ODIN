@@ -50,9 +50,81 @@ const INDIAN_STATES = [
 // Removed MOCK_DATA
 
 document.addEventListener('DOMContentLoaded', () => {
-    initUI();
+    checkGoogleMapsKey();
     checkForUpdates();  // Silent update check on launch
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  API KEY SETUP & INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function checkGoogleMapsKey() {
+    try {
+        const resp = await fetch('/api/config/maps-key');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.has_key && data.key) {
+                // Key exists: dynamically inject Google Maps script
+                injectGoogleMapsScript(data.key);
+                initUI();
+            } else {
+                // No key: show Setup Modal
+                const overlay = document.getElementById('api-setup-overlay');
+                if (overlay) overlay.style.display = 'flex';
+            }
+        }
+    } catch (e) {
+        console.error("Failed to check Maps API Key status:", e);
+        const overlay = document.getElementById('api-setup-overlay');
+        if (overlay) overlay.style.display = 'flex';
+    }
+}
+
+function injectGoogleMapsScript(key) {
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=initMap&libraries=places&loading=async`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+}
+
+async function saveGoogleMapsKey() {
+    const input = document.getElementById('api-key-input');
+    const errorDiv = document.getElementById('api-save-error');
+    const btn = document.getElementById('btn-save-api');
+    const key = input.value.trim();
+    
+    if (!key) {
+        errorDiv.textContent = "Please enter a valid API key.";
+        errorDiv.style.display = 'block';
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+    
+    try {
+        const resp = await fetch('/api/config/maps-key', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: key })
+        });
+        
+        const data = await resp.json();
+        if (resp.ok) {
+            // Success! Reload the page to reboot the app with the new key in effect
+            window.location.reload();
+        } else {
+            throw new Error(data.detail || data.message || "Failed to save key.");
+        }
+    } catch (e) {
+        errorDiv.textContent = e.message;
+        errorDiv.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = "Save & Launch ODIN";
+    }
+}
+
 
 function initUI() {
     const shpInput = document.getElementById('shapefile-upload');

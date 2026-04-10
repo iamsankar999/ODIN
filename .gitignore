@@ -26,7 +26,7 @@ desktop.ini
 # ── Environment / Secrets ─────────────────────────────────────────────────────
 # Keep .env in source control ONLY if you scrub the API key first.
 # Uncomment the line below to exclude it entirely:
-# backend/.env
+backend/.env
 
 # ── Auto-Update staging (generated at runtime) ───────────────────────────────
 _update_staging/
