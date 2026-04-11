@@ -84,7 +84,7 @@ async function handleLaunchClick() {
     if (window.mapsKeyPromise) {
         await window.mapsKeyPromise;
     }
-    
+
     if (window.hasGoogleMapsKey) {
         switchView('view-mode-selection');
     } else {
@@ -105,23 +105,23 @@ async function saveGoogleMapsKey() {
     const errorDiv = document.getElementById('api-save-error');
     const btn = document.getElementById('btn-save-api');
     const key = input.value.trim();
-    
+
     if (!key) {
         errorDiv.textContent = "Please enter a valid API key.";
         errorDiv.style.display = 'block';
         return;
     }
-    
+
     btn.disabled = true;
     btn.textContent = "Saving...";
-    
+
     try {
         const resp = await fetch('/api/config/maps-key', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: key })
         });
-        
+
         const data = await resp.json();
         if (resp.ok) {
             // Success! Switch to the next view
@@ -182,9 +182,9 @@ async function checkForUpdates() {
         const data = await resp.json();
 
         if (data.update_available) {
-            const banner   = document.getElementById('update-banner');
-            const tagEl    = document.getElementById('update-version-tag');
-            const notesEl  = document.getElementById('update-release-notes');
+            const banner = document.getElementById('update-banner');
+            const tagEl = document.getElementById('update-version-tag');
+            const notesEl = document.getElementById('update-release-notes');
 
             if (tagEl) tagEl.textContent = `v${data.latest_version}`;
             if (notesEl) {
@@ -303,6 +303,8 @@ function switchView(viewId) {
 
     if (viewId === 'view-setup') {
         generateWizardUserInputs();
+    } else if (viewId === 'view-components-estimation') {
+        initComponentsEstimation();
     }
 }
 
@@ -372,7 +374,7 @@ function switchSetupTab(tab) {
 
     const activeBtn = Array.from(document.querySelectorAll('.setup-tab-btn')).find(b => b.textContent.toLowerCase().includes(tab));
     if (activeBtn) activeBtn.classList.add('active');
-    
+
     document.getElementById(`panel-${tab}-project`).classList.add('active');
     checkWizardCompletion();
 }
@@ -387,7 +389,7 @@ async function startTask() {
 
     try {
         if (currentSetupTab === 'open') {
-            await parseProjectZip(projectZipFile);
+            // Project zip is already parsed in handleProjectZipUpload
             plazaMappingConfirmed = Object.keys(plazaMapping).length > 0;
         } else {
             plazaMappingConfirmed = false; // Fresh project needs resolution
@@ -425,13 +427,13 @@ async function startTask() {
                 place.assigned_user = allUsers[index % allUsers.length];
             });
         }
-        
+
         filterPlacesByUser();
-        
+
         // Restore: Ensure view-main evaluates whether to show survey mapping
         switchView('view-main');
         selectMode(currentMode); // This function handles the survey vs analytics toggle internally
-        
+
         hideLoading();
         // Trigger initial auto-save to wrap original files and current progress state immediately
         triggerAutoSave();
@@ -466,13 +468,45 @@ async function openProjectWithHandle() {
     }
 }
 
-function handleProjectZipUpload(input) {
+async function handleProjectZipUpload(input) {
     const file = input.files ? input.files[0] : (input.target ? input.target.files[0] : input);
     if (!file) return;
     projectZipFile = file;
-    document.getElementById('status-zip').className = 'status-success';
-    document.getElementById('status-zip').textContent = '● ZIP Loaded';
-    checkWizardCompletion();
+    
+    const zipBtn = document.getElementById('project-zip-btn');
+    if (zipBtn) {
+        zipBtn.classList.remove("loaded", "not-loaded");
+        zipBtn.classList.add("loading");
+        if (zipBtn.childNodes.length > 0) zipBtn.childNodes[0].textContent = "Processing Project...";
+        else zipBtn.textContent = "Processing Project...";
+    }
+
+    try {
+        await parseProjectZip(file);
+        plazaMappingConfirmed = Object.keys(plazaMapping).length > 0;
+
+        if (zipBtn) {
+            zipBtn.classList.remove("loading", "not-loaded");
+            zipBtn.classList.add("loaded");
+            if (zipBtn.childNodes.length > 0) zipBtn.childNodes[0].textContent = "Project ZIP Loaded ✓";
+            else zipBtn.textContent = "Project ZIP Loaded ✓";
+        }
+        
+        const zipStatus = document.getElementById('zip-status');
+        if (zipStatus) {
+            zipStatus.innerHTML = '<span id="status-zip" class="status-success" style="color: #4ade80;">✓</span> <span style="color: #4ade80;">ZIP Loaded</span>';
+        }
+        
+        checkWizardCompletion();
+    } catch (err) {
+        console.error("ZIP load failed:", err);
+        if (zipBtn) {
+            zipBtn.classList.remove("loading");
+            if (zipBtn.childNodes.length > 0) zipBtn.childNodes[0].textContent = "Select Project ZIP";
+            else zipBtn.textContent = "Select Project ZIP";
+        }
+        alert("Failed to parse project bundle: " + err.message);
+    }
 }
 
 /**
@@ -481,7 +515,7 @@ function handleProjectZipUpload(input) {
  */
 function triggerAutoSave() {
     if (!autoSaveHandle) return;
-    
+
     // 1-second debounce to avoid UI lag
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(async () => {
@@ -497,12 +531,12 @@ async function performAutoSave() {
     if (!autoSaveHandle || typeof JSZip === 'undefined') return;
 
     const zip = new JSZip();
-    
+
     // 1. Mapping Progress
     zip.file("resolutions.json", JSON.stringify(resolvedPlaces));
     zip.file("plaza_mapping.json", JSON.stringify(plazaMapping));
     zip.file("project_config.json", JSON.stringify({ mode: currentMode }));
-    
+
     // 2. Original Files (Stashed in app state)
     if (projectOdBlob) {
         zip.file("od_dataset.xlsx", projectOdBlob);
@@ -515,7 +549,7 @@ async function performAutoSave() {
     const writable = await autoSaveHandle.createWritable();
     await writable.write(blob);
     await writable.close();
-    
+
     console.log("Auto-saved project bundle.");
 }
 
@@ -526,7 +560,7 @@ async function performAutoSave() {
 async function parseProjectZip(file) {
     if (typeof JSZip === 'undefined') throw new Error("JSZip library not loaded.");
     const zip = await JSZip.loadAsync(file);
-    
+
     // 1. Load Resolutions
     const resFile = zip.file("resolutions.json");
     if (resFile) {
@@ -564,7 +598,7 @@ async function parseProjectZip(file) {
         const odBlob = await odFile.async("blob");
         projectOdBlob = odBlob;
         currentUploadedFile = odBlob;
-        await handleFileUpload(odBlob);
+        await handleFileUpload(odBlob, true);
     } else {
         throw new Error("Invalid project bundle: Could not find an Excel (.xlsx) dataset.");
     }
@@ -580,7 +614,7 @@ async function parseProjectZip(file) {
     if (shpFile) {
         const shpBlob = await shpFile.async("blob");
         projectShpBlob = shpBlob;
-        await handleShapefileUpload(shpBlob);
+        await handleShapefileUpload(shpBlob, true);
     }
 }
 
@@ -729,7 +763,7 @@ window.initMap = function () {
         // Show confirmation popup with place name
         const infoContent = document.createElement('div');
         infoContent.style.cssText = 'color: black; min-width: 220px; font-family:sans-serif; padding:5px;';
-        
+
         const plazas = place.analytics?.plazas?.headers || [];
         const resolvedFor = resolvedPlaces[place.original_name] || {};
 
@@ -807,11 +841,11 @@ async function fetchZoneForLocation(lat, lng) {
     }
 }
 
-async function handleShapefileUpload(event) {
+async function handleShapefileUpload(event, isFromZip = false) {
     const file = event.target ? event.target.files[0] : event;
     if (!file) return;
 
-    const shpBtns = [
+    const shpBtns = isFromZip ? [] : [
         document.querySelector('label[for="shapefile-upload"]'),
         document.getElementById('wizard-shp-btn'),
         document.getElementById('shapefile-label')
@@ -858,7 +892,7 @@ async function handleShapefileUpload(event) {
         });
 
         const statusDot = document.getElementById('status-shp');
-        if (statusDot) {
+        if (statusDot && !isFromZip) {
             statusDot.classList.remove('status-pending');
             statusDot.classList.add('status-check');
             statusDot.textContent = "✓";
@@ -895,13 +929,13 @@ function clearAnalytics() {
     document.getElementById('commodity-body').innerHTML = `<tr class="empty-state"><td colspan="9">No data</td></tr>`;
 }
 
-async function handleFileUpload(event) {
+async function handleFileUpload(event, isFromZip = false) {
     const file = event.target ? event.target.files[0] : event;
     if (!file) return;
     currentUploadedFile = file;
     projectOdBlob = file; // Stash for bundle
 
-    const odBtns = [
+    const odBtns = isFromZip ? [] : [
         document.querySelector('label[for="file-upload"]'),
         document.getElementById('wizard-od-btn'),
         document.getElementById('file-label')
@@ -947,7 +981,7 @@ async function handleFileUpload(event) {
         });
 
         const statusDot = document.getElementById('status-od');
-        if (statusDot) {
+        if (statusDot && !isFromZip) {
             statusDot.classList.remove('status-pending');
             statusDot.classList.add('status-check');
             statusDot.textContent = "✓";
@@ -981,7 +1015,7 @@ async function handleFileUpload(event) {
                 placeOccurrencesMap[p.original_name] = p.total_occurrences || 0;
                 globalTotalOccurrences += (p.total_occurrences || 0);
             });
-            
+
             allUnmatchedPlaces = [...result.data];
 
             const plazaSet = new Set();
@@ -1478,15 +1512,15 @@ function renderVehicleAnalytics() {
     const tbody = document.getElementById('vehicle-body');
     const place = unmatchedPlaces[currentIndex];
     if (!place || !place.analytics) return;
-    
+
     let vehicles = place.analytics.vehicles;
     let vehicleInteractions = place.analytics.vehicleInteractions;
-    
+
     if (selectedFilterPlaza && place.analytics.vehiclesPlaza && place.analytics.vehiclesPlaza[selectedFilterPlaza]) {
         vehicles = place.analytics.vehiclesPlaza[selectedFilterPlaza];
         vehicleInteractions = place.analytics.vehicleInteractionsPlaza[selectedFilterPlaza] || {};
     }
-    
+
     if (!vehicles || Object.keys(vehicles).length === 0) {
         tbody.innerHTML = `<tr class="empty-state"><td colspan="10">No data</td></tr>`;
         return;
@@ -1509,12 +1543,12 @@ function renderVehicleAnalytics() {
 
 function togglePlazaFilter(plaza, event) {
     if (event) event.stopPropagation();
-    
+
     // Toggle class on body for global styling hooks
     const body = document.body;
     const analyticsView = document.getElementById('standard-analytics-view');
     const leftPane = (analyticsView && analyticsView.closest('.left-pane')) || document.querySelector('.left-pane');
-    
+
     const plazaTrimmed = plaza.trim();
     if (selectedFilterPlaza === plazaTrimmed) {
         selectedFilterPlaza = null; // deselect
@@ -1525,7 +1559,7 @@ function togglePlazaFilter(plaza, event) {
         body.classList.add('plaza-filter-active');
         if (leftPane) leftPane.classList.add('filter-active');
     }
-    
+
     renderVehicleAnalytics();
     renderPlazaAnalytics(); // Re-render to update the active capsule state
     renderCommodityMatrix();
@@ -1536,10 +1570,10 @@ function renderPlazaAnalytics(plazasArg) {
     const tbody = document.querySelector('#plaza-table tbody') || document.getElementById('plaza-body');
     const place = unmatchedPlaces[currentIndex];
     const plazas = plazasArg || (place && place.analytics && place.analytics.plazas);
-    
+
     // Fail safe if table is missing or data is empty
     if (!thead || !tbody) return;
-    
+
     if (!plazas || !plazas.headers || plazas.headers.length === 0) {
         thead.innerHTML = `<tr><th>Waiting for data</th></tr>`;
         tbody.innerHTML = ``;
@@ -1550,17 +1584,17 @@ function renderPlazaAnalytics(plazasArg) {
     const top20Max = plazas.counts ? Math.max(...plazas.counts) : 1;
 
     let rowHtml = '<tr>';
-    
+
     plazas.headers.forEach((h, i) => {
         const hTrimmed = h.trim();
         const count = plazas.counts[i];
         const isResolved = resolvedFor[hTrimmed] || resolvedFor["__all__"];
         const isActive = selectedFilterPlaza === hTrimmed;
-        
+
         const cardClass = isActive ? 'plaza-card selected-plaza-active' : 'plaza-card';
         const resolutionMark = isResolved ? ' <span style="color:#16a34a; font-size:10px;">⬤</span>' : '';
-        const heatBgColor = getHeatColor(count, top20Max); 
-        
+        const heatBgColor = getHeatColor(count, top20Max);
+
         rowHtml += `
             <td style="padding: 2px;">
                 <div class="${cardClass}" onclick="togglePlazaFilter('${hTrimmed}', event)" title="Click to filter by ${hTrimmed}">
@@ -1574,9 +1608,9 @@ function renderPlazaAnalytics(plazasArg) {
             </td>
         `;
     });
-    
+
     rowHtml += '</tr>';
-    
+
     // Clear thead as we are using a single row in tbody for cards
     thead.innerHTML = '';
     tbody.innerHTML = rowHtml;
@@ -1586,7 +1620,7 @@ function renderCommodityMatrix() {
     const tbody = document.getElementById('commodity-body');
     const place = unmatchedPlaces[currentIndex];
     if (!place || !place.analytics) return;
-    
+
     let matrix, interactions;
     if (selectedFilterPlaza && place.analytics.commodityMatrixAbstractPlaza && place.analytics.commodityMatrixAbstractPlaza[selectedFilterPlaza]) {
         matrix = commodityViewMode === 'detailed' ? place.analytics.commodityMatrixDetailedPlaza[selectedFilterPlaza] : place.analytics.commodityMatrixAbstractPlaza[selectedFilterPlaza];
@@ -1595,7 +1629,7 @@ function renderCommodityMatrix() {
         matrix = commodityViewMode === 'detailed' ? place.analytics.commodityMatrixDetailed : place.analytics.commodityMatrixAbstract;
         interactions = commodityViewMode === 'detailed' ? place.analytics.commodityInteractionsDetailed : place.analytics.commodityInteractionsAbstract;
     }
-    
+
     // Fallback if the dict is entirely missing for some reason
     matrix = matrix || {};
     interactions = interactions || {};
@@ -1707,21 +1741,21 @@ function showCommodityInteractions(commCode, vehicleType, commName, event) {
     openFloatingPopup(event, titleStr, contentHTML);
 }
 
-    function openFloatingPopup(event, title, contentHTML) {
-        let popup = document.getElementById('floating-popup');
-        if (!popup) {
-            popup = document.createElement('div');
-            popup.id = 'floating-popup';
-            popup.className = 'floating-popup';
-            popup.innerHTML = `
+function openFloatingPopup(event, title, contentHTML) {
+    let popup = document.getElementById('floating-popup');
+    if (!popup) {
+        popup = document.createElement('div');
+        popup.id = 'floating-popup';
+        popup.className = 'floating-popup';
+        popup.innerHTML = `
                 <div class="popup-header">
                     <h3 id="floating-popup-title"></h3>
                     <button class="btn-close" onclick="closeFloatingPopup()">×</button>
                 </div>
                 <div class="popup-body" id="floating-popup-body"></div>
             `;
-            document.body.appendChild(popup);
-        }
+        document.body.appendChild(popup);
+    }
 
     document.getElementById('floating-popup-title').textContent = title;
     document.getElementById('floating-popup-body').innerHTML = contentHTML;
@@ -1742,7 +1776,7 @@ function showCommodityInteractions(commCode, vehicleType, commName, event) {
     const targetRect = event.target.getBoundingClientRect();
     const originX = targetRect.left + targetRect.width / 2;
     const originY = targetRect.top + targetRect.height / 2;
-    
+
     // Default: Open to the right and below
     let left = targetRect.right + 5;
     let top = targetRect.top;
@@ -1777,7 +1811,7 @@ function showCommodityInteractions(commCode, vehicleType, commName, event) {
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
     popup.style.visibility = 'visible';
-    
+
     popup.classList.add('genie-effect');
 }
 
@@ -1881,8 +1915,8 @@ function calculateHaversine(lat1, lon1, lat2, lon2) {
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return parseFloat((R * c).toFixed(1));
 }
@@ -1960,7 +1994,7 @@ function renderMapElements(place) {
             // Find the closest suggestion for THIS specific plaza to mark as RED
             let minDForThisPlaza = Infinity;
             let closestSugForThisPlaza = null;
-            
+
             place.suggestions.forEach(s => {
                 const d = calculateHaversine(p.pos.lat, p.pos.lng, s.lat, s.lng);
                 if (d < minDForThisPlaza) {
@@ -1972,13 +2006,13 @@ function renderMapElements(place) {
             // Now draw lines to ALL suggestions from this plaza
             place.suggestions.forEach(s => {
                 const dist = calculateHaversine(p.pos.lat, p.pos.lng, s.lat, s.lng);
-                
+
                 // Store distance locally on suggestion for the Popup UI
                 s.plazaDistances = s.plazaDistances || [];
                 s.plazaDistances.push({ plaza: p.name, distance: dist });
 
                 const isClosestForThisPlaza = (s === closestSugForThisPlaza);
-                
+
                 let color = '#4285F4'; // Default Blue
                 let weight = 1.5;
                 let zIndex = 50;
@@ -1990,7 +2024,7 @@ function renderMapElements(place) {
                 } else {
                     // Check if suggestion is outside assigned zone for orange color
                     if (currentMode === "Place assign" && place.assigned_zone && s.zone !== place.assigned_zone) {
-                        color = '#FF9800'; 
+                        color = '#FF9800';
                     }
                 }
 
@@ -2201,12 +2235,12 @@ async function renderCurrentPlace() {
                     if (activeInfoWindow) activeInfoWindow.close();
                     const content = document.createElement('div');
                     content.style.cssText = 'color:black; min-width:220px; font-family:sans-serif; padding:5px;';
-                    
+
                     const plazas = place.analytics?.plazas?.headers || [];
                     const resolvedFor = resolvedPlaces[place.original_name] || {};
                     const unresolvedPlazas = plazas.filter(p => !resolvedFor[p] && !resolvedFor["__all__"]);
 
-                    const distHtml = (s.plazaDistances || []).map(pd => 
+                    const distHtml = (s.plazaDistances || []).map(pd =>
                         `<div style="font-size:12px;margin-bottom:4px;">📍 <strong>${pd.distance} km</strong> from ${pd.plaza}</div>`
                     ).join('') || (s.dist_km != null ? `<div style="font-size:12px;margin-bottom:4px;">📍 Distance: <strong>${s.dist_km} km</strong></div>` : '');
 
@@ -2238,7 +2272,7 @@ async function renderCurrentPlace() {
                     const resolveBtn = document.createElement('button');
                     resolveBtn.textContent = 'Confirm & Resolve';
                     resolveBtn.style.cssText = 'background:#16a34a;color:white;border:none;padding:8px 10px;border-radius:4px;cursor:pointer;width:100%;font-size:12px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);';
-                    
+
                     resolveBtn.addEventListener('click', () => {
                         const resolveAll = content.querySelector('#resolve-all-check').checked;
                         let selectedPlazas = null;
@@ -2249,7 +2283,7 @@ async function renderCurrentPlace() {
                                 return;
                             }
                         }
-                        
+
                         if (activeInfoWindow) activeInfoWindow.close();
                         selectSuggestion(place.id, s, selectedPlazas);
                     });
@@ -2275,7 +2309,7 @@ async function renderCurrentPlace() {
 }
 function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
     const place = unmatchedPlaces[currentIndex];
-    
+
     const resolveData = {
         name: suggestion.name,
         lat: suggestion.lat,
@@ -2292,8 +2326,8 @@ function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: suggestion.name.trim() })
         }).then(res => res.json())
-          .then(data => { if (data.status === 'success') console.log(`DB: Added "${suggestion.name}"`); })
-          .catch(() => {}); // Fire-and-forget, don't block resolution
+            .then(data => { if (data.status === 'success') console.log(`DB: Added "${suggestion.name}"`); })
+            .catch(() => { }); // Fire-and-forget, don't block resolution
     }
 
     if (!resolvedPlaces[place.original_name]) {
@@ -2363,7 +2397,7 @@ function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
     // Re-render
     updateNavigatorDisplay();
     renderCurrentPlace();
-    
+
     // Auto-Save progress
     triggerAutoSave();
 }
@@ -2698,7 +2732,7 @@ function findSimilarUnmatchedPlaces(name) {
         if (pName !== normalizedName) {
             let similarity = jaroWinklerSimilarity(normalizedName, pName);
             if (similarity >= 0.90) {
-               similars.push(p);
+                similars.push(p);
             }
         }
     });
@@ -2709,13 +2743,13 @@ function findSimilarUnmatchedPlaces(name) {
 function showSimilarityModal(originalName, zone, similars, resolveData) {
     document.getElementById('similarity-modal-orig').textContent = originalName;
     document.getElementById('similarity-modal-zone').textContent = zone || '?';
-    
+
     // Deep clone resolveData but exclude rawPlaceInfo
     pendingSimilarityResolveData = { ...resolveData };
-    
+
     const list = document.getElementById('similarity-modal-list');
     list.innerHTML = '';
-    
+
     similars.forEach(sim => {
         let occ = placeOccurrencesMap[sim.original_name] || 0;
         let li = document.createElement('div');
@@ -2725,7 +2759,7 @@ function showSimilarityModal(originalName, zone, similars, resolveData) {
         li.style.padding = '8px 12px';
         li.style.borderBottom = '1px solid var(--border)';
         li.id = `sim-row-${sim.id}`;
-        
+
         li.innerHTML = `
             <div style="font-weight: 600; color: var(--text-primary);">${sim.original_name} <span style="font-weight: normal; color: var(--text-secondary); font-size: 11px;">(${occ} occurrences)</span></div>
             <div style="display: flex; gap: 8px;">
@@ -2735,36 +2769,36 @@ function showSimilarityModal(originalName, zone, similars, resolveData) {
         `;
         list.appendChild(li);
     });
-    
+
     document.getElementById('similarity-modal').classList.add('active');
 }
 
 function assignSimilar(placeId) {
     let place = allUnmatchedPlaces.find(p => p.id == placeId);
     if (!place) return;
-    
+
     let resolveData = { ...pendingSimilarityResolveData };
     resolveData.rawPlaceInfo = place;
-    
+
     if (!resolvedPlaces[place.original_name]) {
         resolvedPlaces[place.original_name] = {};
     }
     resolvedPlaces[place.original_name]["__all__"] = resolveData;
-    
+
     let uidx = unmatchedPlaces.findIndex(p => p.id == placeId);
     if (uidx !== -1) {
         unmatchedPlaces.splice(uidx, 1);
-        if (currentIndex > uidx) currentIndex--; 
+        if (currentIndex > uidx) currentIndex--;
         else if (currentIndex >= unmatchedPlaces.length) currentIndex = Math.max(0, unmatchedPlaces.length - 1);
     }
     let gidx = allUnmatchedPlaces.findIndex(p => p.id == placeId);
     if (gidx !== -1) allUnmatchedPlaces.splice(gidx, 1);
-    
+
     let row = document.getElementById(`sim-row-${placeId}`);
     if (row) {
         row.innerHTML = `<div style="color: #16a34a; font-weight: 600;">${place.original_name} - Assigned ✓</div>`;
     }
-    
+
     triggerAutoSave();
 }
 
@@ -2829,7 +2863,7 @@ function manualTextSearch() {
             const place = unmatchedPlaces[currentIndex];
             const infoContent = document.createElement('div');
             infoContent.style.cssText = 'color: black; min-width: 220px; font-family:sans-serif; padding:5px;';
-            
+
             const plazas = place.analytics?.plazas?.headers || [];
             const resolvedFor = resolvedPlaces[place.original_name] || {};
 
@@ -3183,3 +3217,14 @@ window.addEventListener("click", (e) => {
         if (d) d.classList.remove("show");
     }
 });
+
+/**
+ * Generic handler for Review & Visualization functions.
+ */
+function handleReviewFunction(funcName) {
+    console.log('Review Function Selected: ' + funcName);
+    // Since implementing full logic for each would be a massive scope, 
+    // we provide a premium alert/overlay placeholder.
+    alert(funcName + ': Feature Coming Soon!\n\nThis analytical module is currently being optimized for your dataset.');
+}
+
