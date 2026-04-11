@@ -494,8 +494,11 @@ def apply_update():
         source_root = extract_dir
 
     # 4. Generate _apply_update.bat
+    #    Uses robocopy instead of xcopy.  xcopy's /exclude matches against the
+    #    full *source* path, so putting "_update_staging\" in the exclusion list
+    #    causes it to skip every file (they all live under _update_staging\).
+    #    robocopy's /XD and /XF match by directory/file *name*, which is correct.
     bat_path = PROJECT_ROOT / "_apply_update.bat"
-    odin_launch = PROJECT_ROOT / "ODIN_Launch.bat"
 
     bat_content = f"""@echo off
 setlocal
@@ -513,14 +516,22 @@ timeout /t 1 /nobreak >nul
 netstat -aon 2>nul | findstr ":8000 " | findstr "LISTENING" >nul 2>&1
 if not errorlevel 1 goto wait_loop
 echo  Server stopped.
-timeout /t 1 /nobreak >nul
+timeout /t 2 /nobreak >nul
 
 cd /d "{PROJECT_ROOT}"
 
-:: Copy new files over old ones
-:: Exclude: python-embed, .env, _update_staging, _apply_update.bat
+:: Copy new files over old ones using robocopy
+:: /E           = copy subdirectories including empty ones
+:: /XD          = exclude directories by name (not path substring)
+:: /XF          = exclude files by name
+:: /R:1 /W:1    = retry once, wait 1 sec (avoid hangs on locked files)
+:: /NFL /NDL /NP = suppress per-file/dir/progress logging (keep summary)
 echo  Copying updated files...
-xcopy "{source_root}\\*" .\\ /s /y /q /exclude:_update_staging\\xcopy_exclude.txt >nul 2>&1
+robocopy "{source_root}" "." /E /XD .git python-embed _update_staging __pycache__ /XF .env _apply_update.bat /R:1 /W:1 /NFL /NDL /NP
+:: robocopy exit codes: 0-7 = success, 8+ = error
+if errorlevel 8 (
+    echo  [WARNING] Some files may not have been copied. Check permissions.
+)
 
 :: Delete the packages sentinel so any new requirements get installed
 if exist "python-embed\\.packages_ok" del /q "python-embed\\.packages_ok"
@@ -534,24 +545,13 @@ echo  Update applied successfully!
 echo  Restarting ODIN...
 echo.
 
-:: Relaunch ODIN
-start "" "ODIN_Launch.bat"
+:: Relaunch ODIN with --no-browser flag (existing browser tab will auto-reload)
+start "" "ODIN_Launch.bat" --no-browser
 
 :: Self-delete this batch file
 (goto) 2>nul & del "%~f0"
 """
     bat_path.write_text(bat_content, encoding="utf-8")
-
-    # Write xcopy exclusion list
-    exclude_path = staging_dir / "xcopy_exclude.txt"
-    exclude_path.write_text(
-        "python-embed\\\n"
-        ".env\n"
-        "_update_staging\\\n"
-        "_apply_update.bat\n"
-        ".git\\\n",
-        encoding="utf-8",
-    )
 
     # 5. Launch the bat and shut down
     def _launch_and_exit():

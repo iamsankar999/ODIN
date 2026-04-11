@@ -13,6 +13,10 @@ title ODIN - OD Validation System
 ::  To reset Python    : delete  python-embed\  folder entirely
 :: ─────────────────────────────────────────────────────────────────────────────
 
+:: ── Flags ────────────────────────────────────────────────────────────────────
+set "NO_BROWSER=0"
+if "%~1"=="--no-browser" set "NO_BROWSER=1"
+
 :: ── Paths ────────────────────────────────────────────────────────────────────
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
@@ -123,8 +127,11 @@ echo  [3/3] Starting ODIN server...
 
 :: Launch a background health-checker that polls /api/health every second.
 :: It opens the browser only when the server is actually ready (up to 60s wait).
-:: Written as a single line to avoid ^-continuation parsing issues with start /b.
-start /b powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$i=0; while($i -lt 60){ try{ $r=Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){ Start-Process 'http://127.0.0.1:8000'; break } } catch{}; Start-Sleep -Seconds 1; $i++ }"
+:: Skipped when --no-browser is passed (e.g. during auto-update; the existing tab
+:: has a JS poller that will reload automatically once the server is back up).
+if "%NO_BROWSER%"=="0" (
+    start /b powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$i=0; while($i -lt 60){ try{ $r=Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){ Start-Process 'http://127.0.0.1:8000'; break } } catch{}; Start-Sleep -Seconds 1; $i++ }"
+)
 
 echo.
 echo  +======================================================+
