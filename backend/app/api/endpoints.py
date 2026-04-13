@@ -324,32 +324,19 @@ def get_maps_api_key():
 @router.post("/config/maps-key")
 def set_maps_api_key(payload: APIKeyPayload):
     """
-    Saves the user-provided Google Maps API key to backend/.env and updates os.environ.
+    Saves the user-provided Google Maps API key to os.environ only for the current session.
+    It is no longer saved to backend/.env to ensure it resets on app shutdown.
     """
     import os
-    from pathlib import Path
     
     key = payload.key.strip()
     if not key:
         raise HTTPException(status_code=400, detail="API Key cannot be empty.")
         
-    # Update current runtime environment
+    # Update current runtime environment ONLY
     os.environ["GOOGLE_MAPS_API_KEY"] = key
     
-    # Save to backend/.env
-    # We locate backend/.env relative to the project root
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-    backend_dir = PROJECT_ROOT / "backend"
-    env_file = backend_dir / ".env"
-    
-    if not env_file.exists():
-        # Create empty .env if it doesn't exist
-        env_file.write_text("", encoding="utf-8")
-        
-    # Python-dotenv helps properly quote and manage the .env file
-    dotenv.set_key(str(env_file), "GOOGLE_MAPS_API_KEY", key)
-    
-    return {"status": "success", "message": "API key successfully saved."}
+    return {"status": "success", "message": "API key successfully set for this session."}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -526,8 +513,9 @@ cd /d "{PROJECT_ROOT}"
 :: /XF          = exclude files by name
 :: /R:1 /W:1    = retry once, wait 1 sec (avoid hangs on locked files)
 :: /NFL /NDL /NP = suppress per-file/dir/progress logging (keep summary)
+:: /IS /IT      = include same and tweaked files (forces overwrite even if timestamp is older)
 echo  Copying updated files...
-robocopy "{source_root}" "." /E /XD .git python-embed _update_staging __pycache__ /XF .env _apply_update.bat /R:1 /W:1 /NFL /NDL /NP
+robocopy "{source_root}" "." /E /XD .git python-embed _update_staging __pycache__ /XF .env _apply_update.bat /R:1 /W:1 /NFL /NDL /NP /IS /IT
 :: robocopy exit codes: 0-7 = success, 8+ = error
 if errorlevel 8 (
     echo  [WARNING] Some files may not have been copied. Check permissions.

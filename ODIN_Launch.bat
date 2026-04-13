@@ -161,3 +161,5 @@ echo.
 echo  ODIN server has stopped.
 echo  Press any key to close this window.
 pause > nul
+:: Force file size change for auto-updater
+
