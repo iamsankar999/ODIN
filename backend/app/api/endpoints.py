@@ -94,6 +94,19 @@ def get_suggestions(
 def get_status():
     return {"status": "ok"}
 
+import time
+import os
+import threading
+
+@router.post("/shutdown")
+def api_shutdown():
+    """Shuts down the backend server."""
+    def _shutdown():
+        time.sleep(0.5)
+        os._exit(0)
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return {"status": "shutting down"}
+
 @router.post("/upload/excel")
 async def upload_excel(
     file: UploadFile = File(...),

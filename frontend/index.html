@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="css/style.css?v=2.4.4">
+    <link rel="stylesheet" href="css/style.css?v=2.4.7">
 </head>
 
 <body>
@@ -378,6 +378,8 @@
                     <div class="status-indicator" title="Backend Status">
                         <span class="status-dot" id="system-dot"></span>
                     </div>
+
+                    <button id="shutdown-btn" class="btn btn-sm btn-outline" title="Shutdown ODIN" onclick="shutdownApp()">✕</button>
                 </div>
             </header>
 
@@ -439,6 +441,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <div id="vehicle-direction-panel" class="direction-panel"></div>
                         </div>
 
                         <!-- Top Left: Survey Location -->
@@ -510,7 +513,7 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
         <!-- Custom JS -->
-        <script src="js/app.js?v=2.4.4"></script>
+        <script src="js/app.js?v=2.4.7"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script src="js/basenumber.js"></script>
 

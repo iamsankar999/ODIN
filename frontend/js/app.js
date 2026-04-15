@@ -22,6 +22,7 @@ let plazaVerificationMarkers = {}; // Track green markers for map-picked survey 
 
 let currentSetupTab = 'new'; // 'new' or 'open'
 let projectZipFile = null;
+let projectZipParsed = false;
 let projectShpBlob = null;
 let projectOdBlob = null;
 let autoSaveHandle = null;
@@ -340,7 +341,7 @@ function generateWizardUserInputs() {
 
 function checkWizardCompletion() {
     const newProjectReady = filesUploaded.shp && filesUploaded.od;
-    const openProjectReady = projectZipFile !== null;
+    const openProjectReady = projectZipFile !== null && projectZipParsed === true;
     const projectReady = newProjectReady || openProjectReady;
 
     // Track which path we are using for startTask
@@ -497,6 +498,7 @@ async function handleProjectZipUpload(input) {
             zipStatus.innerHTML = '<span id="status-zip" class="status-success" style="color: #4ade80;">✓</span> <span style="color: #4ade80;">ZIP Loaded</span>';
         }
         
+        projectZipParsed = true;
         checkWizardCompletion();
     } catch (err) {
         console.error("ZIP load failed:", err);
@@ -535,7 +537,11 @@ async function performAutoSave() {
     // 1. Mapping Progress
     zip.file("resolutions.json", JSON.stringify(resolvedPlaces));
     zip.file("plaza_mapping.json", JSON.stringify(plazaMapping));
-    zip.file("project_config.json", JSON.stringify({ mode: currentMode }));
+    zip.file("project_config.json", JSON.stringify({ 
+        mode: currentMode,
+        comm_abstract: COMMODITIES_ABSTRACT,
+        comm_detailed: COMMODITIES_DETAILED
+    }));
 
     // 2. Original Files (Stashed in app state)
     if (projectOdBlob) {
@@ -584,6 +590,8 @@ async function parseProjectZip(file) {
             if (modeSelector) modeSelector.value = currentMode;
             console.log("Restored mode:", currentMode);
         }
+        if (cfg.comm_abstract) COMMODITIES_ABSTRACT = cfg.comm_abstract;
+        if (cfg.comm_detailed) COMMODITIES_DETAILED = cfg.comm_detailed;
     }
 
     // 2. Load and Upload OD Dataset (Smart search)
@@ -980,30 +988,31 @@ async function handleFileUpload(event, isFromZip = false) {
             }
         });
 
+        // Always parse commodity codes regardless of isFromZip
+        if (result.ca_codes_abstract && result.ca_codes_abstract.length > 0) {
+            COMMODITIES_ABSTRACT = result.ca_codes_abstract.map(row => {
+                const vals = Object.values(row);
+                return {
+                    code: vals.length > 0 ? vals[0].toString() : '?',
+                    name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
+                };
+            });
+        }
+        if (result.ca_codes_detailed && result.ca_codes_detailed.length > 0) {
+            COMMODITIES_DETAILED = result.ca_codes_detailed.map(row => {
+                const vals = Object.values(row);
+                return {
+                    code: vals.length > 0 ? vals[0].toString() : '?',
+                    name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
+                };
+            });
+        }
+
         const statusDot = document.getElementById('status-od');
         if (statusDot && !isFromZip) {
             statusDot.classList.remove('status-pending');
             statusDot.classList.add('status-check');
             statusDot.textContent = "✓";
-            if (result.ca_codes_abstract && result.ca_codes_abstract.length > 0) {
-                COMMODITIES_ABSTRACT = result.ca_codes_abstract.map(row => {
-                    const vals = Object.values(row);
-                    return {
-                        code: vals.length > 0 ? vals[0].toString() : '?',
-                        name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
-                    };
-                });
-            }
-            if (result.ca_codes_detailed && result.ca_codes_detailed.length > 0) {
-                COMMODITIES_DETAILED = result.ca_codes_detailed.map(row => {
-                    const vals = Object.values(row);
-                    return {
-                        code: vals.length > 0 ? vals[0].toString() : '?',
-                        name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
-                    };
-                });
-            }
-
         }
 
         renderUserDropdown();
@@ -1456,7 +1465,7 @@ function updateNavigatorDisplay() {
     Object.keys(resolvedPlaces).forEach(name => {
         resolvedOccurrences += placeOccurrencesMap[name] || 0;
     });
-    const completionPercent = globalTotalOccurrences > 0 ? Math.round((resolvedOccurrences / globalTotalOccurrences) * 100) : 0;
+    const completionPercent = globalTotalOccurrences > 0 ? ((resolvedOccurrences / globalTotalOccurrences) * 100).toFixed(2) : "0.00";
     const progressEl = document.getElementById('completion-progress');
     if (progressEl) {
         progressEl.textContent = `${completionPercent}%`;
@@ -1510,6 +1519,7 @@ function getHeatColor(val, maxVal) {
 
 function renderVehicleAnalytics() {
     const tbody = document.getElementById('vehicle-body');
+    const dirPanel = document.getElementById('vehicle-direction-panel');
     const place = unmatchedPlaces[currentIndex];
     if (!place || !place.analytics) return;
 
@@ -1523,10 +1533,14 @@ function renderVehicleAnalytics() {
 
     if (!vehicles || Object.keys(vehicles).length === 0) {
         tbody.innerHTML = `<tr class="empty-state"><td colspan="10">No data</td></tr>`;
+        if (dirPanel) { dirPanel.innerHTML = ''; dirPanel.classList.remove('expanded'); }
         return;
     }
+
     const cols = ['CAR', 'MB', 'GB', 'ML', 'LGV', '2T', '3T', '4T', '5T', '6T'];
-    let html = '<tr>';
+
+    // Render main totals row
+    let html = '<tr class="main-vehicle-row">';
     cols.forEach(c => {
         let val = vehicles[c] || 0;
         let intHTML = '';
@@ -1539,30 +1553,113 @@ function renderVehicleAnalytics() {
     });
     html += '</tr>';
     tbody.innerHTML = html;
+
+    // Render direction panel
+    if (selectedFilterPlaza && dirPanel) {
+        let allDirs = new Set();
+        cols.forEach(c => {
+            if (vehicleInteractions && !Array.isArray(vehicleInteractions[c])) {
+                Object.keys(vehicleInteractions[c] || {}).forEach(d => allDirs.add(d));
+            }
+        });
+        const dirArray = Array.from(allDirs);
+
+        if (dirArray.length > 0) {
+            let dirHTML = '';
+            dirArray.forEach(dir => {
+                dirHTML += `<div class="dir-section">`;
+                dirHTML += `<div class="dir-heading">${dir}</div>`;
+                dirHTML += `<div class="dir-values">`;
+                cols.forEach(c => {
+                    let sum = 0;
+                    if (vehicleInteractions && vehicleInteractions[c] && !Array.isArray(vehicleInteractions[c])) {
+                        const pairs = vehicleInteractions[c][dir];
+                        if (pairs) pairs.forEach(p => sum += extractCountFromPair(p));
+                    }
+                    dirHTML += `<span class="dir-cell">${sum}</span>`;
+                });
+                dirHTML += `</div></div>`;
+            });
+
+            dirPanel.innerHTML = dirHTML;
+
+            // Trigger expand on next frame
+            requestAnimationFrame(() => {
+                dirPanel.classList.add('expanded');
+            });
+        } else {
+            dirPanel.innerHTML = '';
+            dirPanel.classList.remove('expanded');
+        }
+    } else if (dirPanel) {
+        // No plaza selected — collapse immediately (already collapsed if toggled via togglePlazaFilter)
+        dirPanel.classList.remove('expanded');
+        // Clear content after transition
+        setTimeout(() => {
+            if (!dirPanel.classList.contains('expanded')) {
+                dirPanel.innerHTML = '';
+            }
+        }, 400);
+    }
+}
+
+function collapseDirectionPanel(callback) {
+    const dirPanel = document.getElementById('vehicle-direction-panel');
+    if (dirPanel && dirPanel.classList.contains('expanded')) {
+        dirPanel.classList.remove('expanded');
+        // Wait for CSS transition to complete before callback
+        setTimeout(() => {
+            dirPanel.innerHTML = '';
+            if (callback) callback();
+        }, 400);
+    } else {
+        if (callback) callback();
+    }
 }
 
 function togglePlazaFilter(plaza, event) {
     if (event) event.stopPropagation();
 
-    // Toggle class on body for global styling hooks
     const body = document.body;
     const analyticsView = document.getElementById('standard-analytics-view');
     const leftPane = (analyticsView && analyticsView.closest('.left-pane')) || document.querySelector('.left-pane');
 
     const plazaTrimmed = plaza.trim();
-    if (selectedFilterPlaza === plazaTrimmed) {
-        selectedFilterPlaza = null; // deselect
-        body.classList.remove('plaza-filter-active');
-        if (leftPane) leftPane.classList.remove('filter-active');
-    } else {
-        selectedFilterPlaza = plazaTrimmed;
-        body.classList.add('plaza-filter-active');
-        if (leftPane) leftPane.classList.add('filter-active');
-    }
 
-    renderVehicleAnalytics();
-    renderPlazaAnalytics(); // Re-render to update the active capsule state
-    renderCommodityMatrix();
+    if (selectedFilterPlaza === plazaTrimmed) {
+        // DESELECTING — animate collapse first, then update state
+        collapseDirectionPanel(() => {
+            selectedFilterPlaza = null;
+            body.classList.remove('plaza-filter-active');
+            if (leftPane) leftPane.classList.remove('filter-active');
+            renderVehicleAnalytics();
+            renderPlazaAnalytics();
+            renderCommodityMatrix();
+        });
+        return;
+    } else {
+        // SELECTING a new plaza (or switching from another)
+        // If already expanded, collapse first then expand new
+        const dirPanel = document.getElementById('vehicle-direction-panel');
+        if (dirPanel && dirPanel.classList.contains('expanded')) {
+            dirPanel.classList.remove('expanded');
+            setTimeout(() => {
+                selectedFilterPlaza = plazaTrimmed;
+                body.classList.add('plaza-filter-active');
+                if (leftPane) leftPane.classList.add('filter-active');
+                renderVehicleAnalytics();
+                renderPlazaAnalytics();
+                renderCommodityMatrix();
+            }, 250);
+        } else {
+            selectedFilterPlaza = plazaTrimmed;
+            body.classList.add('plaza-filter-active');
+            if (leftPane) leftPane.classList.add('filter-active');
+            renderVehicleAnalytics();
+            renderPlazaAnalytics();
+            renderCommodityMatrix();
+        }
+    }
 }
 
 function renderPlazaAnalytics(plazasArg) {
@@ -1640,7 +1737,11 @@ function renderCommodityMatrix() {
     }
     const commodityList = commodityViewMode === 'detailed' ? COMMODITIES_DETAILED : COMMODITIES_ABSTRACT;
     const codeLookup = {};
-    commodityList.forEach(c => { codeLookup[c.code.toString()] = c.name; });
+    commodityList.forEach(c => { 
+        // Ensure robust code matching by safely converting string/float/int keys
+        const clean = parseInt(parseFloat(c.code)).toString();
+        codeLookup[clean] = c.name; 
+    });
 
     const vehicleCols = ['ML', 'LGV', '2T', '3T', '4T', '5T', '6T'];
 
@@ -1667,7 +1768,8 @@ function renderCommodityMatrix() {
 
     let html = '';
     rowData.forEach(({ code, row, total }) => {
-        const name = codeLookup[code] || `Code ${code}`;
+        const cleanCode = parseInt(parseFloat(code)).toString();
+        const name = codeLookup[cleanCode] || `Code ${code}`;
         const hasInteractions = interactions[code] && Object.keys(interactions[code]).length > 0;
         const isTop5 = top5Codes.has(code);
         const rowClass = isTop5 ? 'class="commodity-top5"' : '';
@@ -2413,7 +2515,7 @@ function toggleReviewDropdown() {
 
     if (!dropdown.classList.contains('show')) {
         dropdown.innerHTML = '';
-        const resolvedKeys = Object.keys(resolvedPlaces);
+        const resolvedKeys = Object.keys(resolvedPlaces).reverse();
 
         if (resolvedKeys.length === 0) {
             dropdown.innerHTML = `<div style="padding: 1rem; color: var(--text-secondary); text-align: center; font-size: 0.85rem;">No places validated yet.</div>`;
@@ -2432,10 +2534,12 @@ function toggleReviewDropdown() {
                 nameHeader.style.marginBottom = '4px';
 
                 const nameSpan = document.createElement('span');
-                nameSpan.innerHTML = `<b>${origName}</b>`;
+                nameSpan.innerHTML = `<b style="font-size: 0.75rem;">${origName}</b>`;
 
                 const editBtn = document.createElement('button');
                 editBtn.className = 'btn btn-sm btn-outline';
+                editBtn.style.padding = '0.15rem 0.4rem';
+                editBtn.style.fontSize = '0.65rem';
                 editBtn.textContent = 'Edit';
                 editBtn.onclick = (e) => { e.stopPropagation(); editResolvedPlace(origName); };
 
@@ -2445,20 +2549,29 @@ function toggleReviewDropdown() {
 
                 // List resolved plazas
                 const details = document.createElement('div');
-                details.style.fontSize = '11px';
-                details.style.color = '#666';
+                details.style.fontSize = '10px';
+                details.style.color = '#777';
                 if (mapping["__all__"]) {
-                    details.innerHTML = `&rarr; ${mapping["__all__"].name} (All Plazas)`;
+                    details.innerHTML = `&rarr; ${mapping["__all__"].name} <span style="font-size:9px;">(All Plazas)</span>`;
                 } else {
                     const plazaNames = Object.keys(mapping).filter(k => k !== "rawPlaceInfo");
-                    details.innerHTML = `&rarr; ${plazaNames.length} custom plaza mappings`;
+                    details.innerHTML = `&rarr; ${plazaNames.length} custom mappings`;
                 }
                 item.appendChild(details);
                 dropdown.appendChild(item);
             });
         }
+        
+        dropdown.style.transformOrigin = "top right";
+        dropdown.classList.remove('out');
+        dropdown.classList.add('genie-effect');
+        dropdown.classList.add('show');
+    } else {
+        dropdown.classList.add('out');
+        setTimeout(() => {
+            dropdown.classList.remove('show', 'out', 'genie-effect');
+        }, 300);
     }
-    dropdown.classList.toggle('show');
 }
 
 
@@ -3013,6 +3126,8 @@ function saveProgress(withAlert = true) {
         uniquePlazas,
         filesUploaded,
         currentIndex,
+        COMMODITIES_ABSTRACT,
+        COMMODITIES_DETAILED,
         timestamp: new Date().getTime()
     };
 
@@ -3052,6 +3167,9 @@ function resumeSession() {
         uniquePlazas = session.uniquePlazas || [];
         filesUploaded = session.filesUploaded || { shp: false, od: false };
         currentIndex = session.currentIndex || 0;
+        
+        if (session.COMMODITIES_ABSTRACT) COMMODITIES_ABSTRACT = session.COMMODITIES_ABSTRACT;
+        if (session.COMMODITIES_DETAILED) COMMODITIES_DETAILED = session.COMMODITIES_DETAILED;
 
         // Update UI Components
         renderUserDropdown();
@@ -3226,5 +3344,16 @@ function handleReviewFunction(funcName) {
     // Since implementing full logic for each would be a massive scope, 
     // we provide a premium alert/overlay placeholder.
     alert(funcName + ': Feature Coming Soon!\n\nThis analytical module is currently being optimized for your dataset.');
+}
+
+async function shutdownApp() {
+    if (confirm("Are you sure you want to exit ODIN? This will terminate the background terminal processor and close this tab.")) {
+        try {
+            await fetch('http://localhost:8000/api/shutdown', { method: 'POST' });
+        } catch (e) {
+            // Error occurs because server closed connection instantly, which is expected.
+        }
+        window.close(); // Ask browser to close the tab
+    }
 }
 
