@@ -2859,4 +2859,608 @@ body.light-theme .direction-panel .dir-section {
     background: #ef4444;
     color: white;
     border-color: #ef4444;
-}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   REVIEW & VISUALIZATION MODE — Fully Isolated Styles
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── R&V Header ─────────────────────────────────────────────────────────────── */
+.rv-header {
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
+    height: 48px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    z-index: 11000;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.rv-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    padding-right: 0.75rem;
+    border-right: 1px solid var(--border);
+}
+
+.rv-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.rv-mode-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.rv-header-center {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.rv-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+/* ── R&V User Selector ──────────────────────────────────────────────────────── */
+.rv-user-selector {
+    position: relative;
+}
+
+.rv-user-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 140px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    display: none;
+    flex-direction: column;
+    z-index: 12000;
+    overflow: hidden;
+}
+
+.rv-user-dropdown.show {
+    display: flex;
+}
+
+/* ── R&V Tab Switch — Liquid Morphism Slider ─────────────────────────────────── */
+.rv-tab-switch {
+    display: flex;
+    position: relative;
+    height: 32px;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 3px;
+    overflow: hidden;
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+body.light-theme .rv-tab-switch {
+    background: rgba(226, 232, 240, 0.8);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.rv-tab-slider {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: calc(50% - 3px);
+    height: calc(100% - 6px);
+    background: linear-gradient(135deg, var(--accent) 0%, #6366f1 100%);
+    border-radius: 8px;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+    box-shadow:
+        0 2px 12px rgba(59, 130, 246, 0.4),
+        0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+body.light-theme .rv-tab-slider {
+    box-shadow:
+        0 2px 8px rgba(37, 99, 235, 0.35),
+        0 0 16px rgba(37, 99, 235, 0.1);
+}
+
+.rv-tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    z-index: 2;
+    position: relative;
+    transition: color 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    padding: 0 12px;
+}
+
+.rv-tab-btn.active {
+    color: #ffffff;
+}
+
+.rv-tab-btn:hover:not(.active) {
+    color: var(--text-primary);
+}
+
+/* ── R&V Split Layout ────────────────────────────────────────────────────────── */
+.rv-split-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.rv-left-pane {
+    flex: 0 0 50%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-dark);
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.rv-right-pane {
+    flex: 1;
+    position: relative;
+    background: #0a0a0a;
+}
+
+.rv-map-wrapper {
+    position: absolute;
+    inset: 0;
+}
+
+.rv-map-container {
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+}
+
+/* ── Tab Content ─────────────────────────────────────────────────────────────── */
+.rv-tab-content {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.rv-tab-content.active {
+    display: flex;
+}
+
+/* ── R&V Table ───────────────────────────────────────────────────────────────── */
+.rv-table-wrapper {
+    flex: 1;
+    overflow: auto;
+}
+
+.rv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.rv-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.rv-table thead th {
+    text-align: center;
+    padding: 0.6rem 0.5rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    border-bottom: 2px solid var(--border);
+    background: var(--table-header);
+    white-space: nowrap;
+}
+
+.rv-table tbody td {
+    padding: 0.5rem 0.4rem;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+    text-align: center;
+    vertical-align: middle;
+    color: var(--text-primary);
+}
+
+.rv-data-row {
+    transition: background 0.2s ease;
+}
+
+.rv-data-row:hover {
+    background: rgba(59, 130, 246, 0.06);
+}
+
+.rv-data-row.rv-row-active {
+    background: rgba(59, 130, 246, 0.12) !important;
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rv-row-removed {
+    opacity: 0.5;
+}
+
+.rv-row-removed td {
+    text-decoration: line-through;
+    text-decoration-color: var(--danger);
+}
+
+.rv-cell-sno {
+    width: 50px;
+    font-weight: 600;
+    color: var(--text-secondary) !important;
+}
+
+.rv-cell-zone {
+    width: 80px;
+    font-weight: 700;
+    color: var(--accent) !important;
+}
+
+.rv-cell-origin,
+.rv-cell-dest {
+    text-align: left !important;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rv-cell-count {
+    width: 80px;
+    font-weight: 700;
+}
+
+.rv-cell-actions {
+    width: 200px;
+}
+
+/* ── Action Buttons ──────────────────────────────────────────────────────────── */
+.rv-action-group {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    flex-wrap: nowrap;
+}
+
+.rv-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.62rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.rv-btn-mapview:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.rv-btn-details:hover {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: var(--warning);
+    color: var(--warning);
+}
+
+.rv-btn-remove:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.rv-btn-remove:disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+/* ── Status Badges ───────────────────────────────────────────────────────────── */
+.rv-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.rv-status-pending {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.rv-status-removed {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.rv-status-resolved {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Details Dropdown ────────────────────────────────────────────────────────── */
+.rv-details-row td {
+    padding: 0 !important;
+    border-bottom: 2px solid var(--accent) !important;
+}
+
+.rv-details-content {
+    padding: 0.75rem 1rem;
+    background: rgba(59, 130, 246, 0.04);
+    animation: rvSlideDown 0.3s ease;
+}
+
+@keyframes rvSlideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        max-height: 200px;
+        transform: translateY(0);
+    }
+}
+
+.rv-details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.rv-details-section h4 {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 0.5rem;
+}
+
+.rv-detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.rv-detail-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.62rem;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.rv-detail-chip strong {
+    color: var(--accent);
+}
+
+.rv-detail-commodity strong {
+    color: var(--warning);
+}
+
+/* ── Empty State ─────────────────────────────────────────────────────────────── */
+.rv-empty-state td {
+    padding: 3rem 1rem !important;
+    border-bottom: none !important;
+}
+
+.rv-empty-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.rv-empty-icon p {
+    font-size: 0.9rem;
+    max-width: 300px;
+    line-height: 1.5;
+}
+
+/* ── Coming Soon Placeholder ─────────────────────────────────────────────────── */
+.rv-coming-soon {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    text-align: center;
+    padding: 2rem;
+}
+
+.rv-coming-soon svg {
+    opacity: 0.6;
+    animation: rvPulseIcon 3s ease-in-out infinite;
+}
+
+@keyframes rvPulseIcon {
+    0%, 100% { transform: scale(1); opacity: 0.6; }
+    50% { transform: scale(1.08); opacity: 0.9; }
+}
+
+.rv-coming-soon h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.rv-coming-soon p {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    max-width: 400px;
+    line-height: 1.5;
+    margin: 0;
+}
+
+/* ── Light Theme Overrides for R&V ───────────────────────────────────────────── */
+body.light-theme .rv-header {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+body.light-theme .rv-mode-badge {
+    background: rgba(37, 99, 235, 0.08);
+}
+
+body.light-theme .rv-data-row:hover {
+    background: rgba(37, 99, 235, 0.04);
+}
+
+body.light-theme .rv-data-row.rv-row-active {
+    background: rgba(37, 99, 235, 0.08) !important;
+}
+
+body.light-theme .rv-details-content {
+    background: rgba(37, 99, 235, 0.03);
+}
+
+body.light-theme .rv-right-pane {
+    background: #e2e8f0;
+}
+
+body.light-theme .rv-coming-soon svg {
+    stroke: var(--accent);
+}
+
+/* ── Expanded Details Styles ─────────────────────────────────────────────── */
+.rv-details-expanded {
+    padding: 1.25rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    margin: 4px 0 12px 0;
+    border-left: 3px solid var(--accent);
+}
+
+body.light-theme .rv-details-expanded {
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.rv-details-section h4 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    opacity: 0.8;
+}
+
+.rv-detail-vehicle-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.rv-vehicle-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+body.light-theme .rv-vehicle-detail-row {
+    background: #fff;
+    border-color: #e2e8f0;
+}
+
+.rv-detail-commodities-sub {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex: 1;
+}
+
+.rv-commodity-tag {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: rgba(74, 222, 128, 0.1);
+    color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+body.light-theme .rv-commodity-tag {
+    background: rgba(22, 163, 74, 0.08);
+    color: #16a34a;
+    border-color: rgba(22, 163, 74, 0.2);
+}
+
+.rv-no-data-tag {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    opacity: 0.6;
+}
+
+.rv-cell-zone {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--accent);
+}
+

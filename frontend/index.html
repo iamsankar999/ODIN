@@ -221,7 +221,7 @@
                 
                 <p style="color:#94a3b8; margin-bottom:2rem; text-align: center;">Choose how you want to process the uploaded validation
                     data.</p>
-                <div class="mode-btn-group">
+                <div class="mode-btn-group" style="grid-template-columns: repeat(3, 1fr);">
                     <div class="mode-card" onclick="selectModeForSetup('Zone assign')">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -239,17 +239,7 @@
                         <h3>Place assign</h3>
                         <p class="mode-desc">assign exact coordinates for a place inside an already assigned zone.</p>
                     </div>
-                    <div class="mode-card" onclick="selectModeForSetup('Base number')">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="12" y1="20" x2="12" y2="10"></line>
-                            <line x1="18" y1="20" x2="18" y2="4"></line>
-                            <line x1="6" y1="20" x2="6" y2="16"></line>
-                        </svg>
-                        <h3>Base number</h3>
-                        <p class="mode-desc">analytics & insights based on historical traffic data</p>
-                    </div>
-                    <div class="mode-card" onclick="alert('Review & Visualization: Coming soon!')">
+                    <div class="mode-card" onclick="enterReviewVisualization()">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -516,6 +506,7 @@
         <script src="js/app.js?v=2.4.7"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script src="js/basenumber.js"></script>
+        <script src="js/review_viz.js?v=2.4.7"></script>
 
 
         <!-- User Management Modal -->
@@ -744,6 +735,147 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  REVIEW & VISUALIZATION MODE (Fully Independent View)                 -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div id="view-review-viz" class="app-view">
+        <div class="app-container" style="flex-direction: column; height: 100vh;">
+            <!-- R&V Header -->
+            <header class="rv-header">
+                <!-- Left cluster: Logo + Title + Mode label -->
+                <div class="rv-header-left">
+                    <img src="assets/logo.svg" alt="ODIN Logo" class="header-logo">
+                    <h1 class="rv-title">ODIN</h1>
+                    <span class="rv-mode-badge">Review & Visualization</span>
+                </div>
+
+                <!-- Center cluster: User, Theme, Actions -->
+                <div class="rv-header-center">
+                    <!-- User selector -->
+                    <div class="rv-user-selector" id="rv-user-selector">
+                        <button class="btn btn-sm btn-outline" onclick="rvToggleUserDropdown()" title="Select User">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            <span id="rv-current-user">All Users</span> ▾
+                        </button>
+                        <div class="rv-user-dropdown" id="rv-user-dropdown"></div>
+                    </div>
+
+                    <!-- Theme toggle -->
+                    <div class="theme-toggle-ios">
+                        <input type="checkbox" id="rv-theme-toggle" onchange="toggleTheme()">
+                        <label for="rv-theme-toggle" class="toggle-track">
+                            <span class="toggle-thumb" id="rv-toggle-thumb">🌙</span>
+                        </label>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <button class="btn btn-sm btn-danger" onclick="rvGoBack()"
+                        style="background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #f87171;">Back</button>
+                    <button class="btn btn-sm btn-success" onclick="rvSave()" title="Save Progress">Save</button>
+                    <button class="btn btn-sm btn-outline" onclick="rvLoadData()" title="Load Data">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        Load Data
+                    </button>
+                    <button class="btn btn-sm btn-outline" onclick="rvExport()" title="Export">Export</button>
+                </div>
+
+                <!-- Right cluster: Slider switch + status + close -->
+                <div class="rv-header-right">
+                    <!-- Intrazonal <> Illogical Pairs liquid slider -->
+                    <div class="rv-tab-switch" id="rv-tab-switch">
+                        <div class="rv-tab-slider" id="rv-tab-slider"></div>
+                        <button class="rv-tab-btn active" id="rv-tab-intrazonal" onclick="rvToggleSubTab('intrazonal')">
+                            Intrazonal Trips
+                        </button>
+                        <button class="rv-tab-btn" id="rv-tab-illogical" onclick="rvToggleSubTab('illogical')">
+                            Illogical Pairs
+                        </button>
+                    </div>
+
+                    <!-- Backend status -->
+                    <div class="status-indicator" title="Backend Status">
+                        <span class="status-dot" id="rv-system-dot"></span>
+                    </div>
+
+                    <!-- Shutdown -->
+                    <button class="btn btn-sm btn-outline" id="rv-shutdown-btn" title="Shutdown ODIN" onclick="shutdownApp()"
+                        style="color: var(--danger); border-color: var(--danger); background: rgba(239,68,68,0.05); font-size:1.2rem; padding: 0 0.5rem; height:32px;">✕</button>
+                </div>
+            </header>
+
+            <!-- R&V Main Content: 50/50 split -->
+            <main class="rv-split-layout">
+                <!-- Left: Analytical Table -->
+                <section class="rv-left-pane" id="rv-left-pane">
+                    <!-- Intrazonal Trips tab content -->
+                    <div id="rv-intrazonal-content" class="rv-tab-content active">
+                        <div class="rv-table-wrapper">
+                            <table class="rv-table" id="rv-intrazonal-table">
+                                <thead>
+                                    <tr>
+                                        <th>S.No</th>
+                                        <th>Zone No.</th>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Trip Count</th>
+                                        <th>Review & Action</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rv-intrazonal-body">
+                                    <tr class="rv-empty-state">
+                                        <td colspan="7">
+                                            <div class="rv-empty-icon">
+                                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5">
+                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                    <circle cx="12" cy="12" r="3"></circle>
+                                                </svg>
+                                                <p>Load project data to detect intrazonal trips</p>
+                                                <button class="btn btn-sm btn-primary" onclick="rvLoadData()" style="margin-top: 0.5rem;">Load Data</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Illogical Pairs tab content (Coming Soon) -->
+                    <div id="rv-illogical-content" class="rv-tab-content">
+                        <div class="rv-coming-soon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            <h2>Feature Coming Soon</h2>
+                            <p>Illogical Pairs detection will be available in a future update.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Right: Map -->
+                <section class="rv-right-pane">
+                    <div class="rv-map-wrapper">
+                        <div id="rv-map" class="rv-map-container">
+                            <div class="map-placeholder" id="rv-map-placeholder">
+                                <p>Map will load here</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
         </div>
     </div>
 </body>
