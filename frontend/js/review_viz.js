@@ -20,6 +20,18 @@ let rv_dataLoaded = false;
 let rv_expandedRow = -1;              // Currently expanded details row
 let rv_statusInterval = null;         // Backend status polling
 
+// Edit Mode State
+let rv_isEditMode = false;
+let rv_editingTripIdx = -1;
+let rv_editingPoint = null;           // 'O' or 'D'
+let rv_autocompleteInstance = null;
+let rv_projectZipFile = null;         // Store the uploaded ZIP for export
+let rv_projectOdBlob = null;          // OD Excel blob for export
+let rv_projectShpBlob = null;         // Shapefile blob for export
+let rv_resolutions = {};              // Resolutions from project ZIP
+let rv_plazaMapping = {};             // Plaza mapping from project ZIP
+let rv_validatorName = '';            // Validator's name (entered after data load)
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function rvCleanZoneId(zone) {
@@ -204,6 +216,7 @@ async function rvParseProjectZip(file) {
         return;
     }
 
+    rv_projectZipFile = file;
     const zip = await JSZip.loadAsync(file);
 
     // Load resolutions if present
@@ -226,10 +239,11 @@ async function rvParseProjectZip(file) {
     }
 
     const odBlob = await odFile.async('blob');
+    rv_projectOdBlob = new File([odBlob], 'od_dataset.xlsx');
 
     // Upload to backend for parsing
     const formData = new FormData();
-    formData.append('file', new File([odBlob], 'od_dataset.xlsx'));
+    formData.append('file', rv_projectOdBlob);
     formData.append('mode', 'Zone assign');
 
     try {
@@ -245,23 +259,39 @@ async function rvParseProjectZip(file) {
         }
         if (shpFile) {
             const shpBlob = await shpFile.async('blob');
+            rv_projectShpBlob = new File([shpBlob], 'shapefile.zip');
             const shpForm = new FormData();
-            shpForm.append('file', new File([shpBlob], 'shapefile.zip'));
+            shpForm.append('file', rv_projectShpBlob);
             await fetch('/api/upload/shapefile', { method: 'POST', body: shpForm });
             rv_shapefileGdf = true;
         }
 
         // Load resolutions to get zone assignments
         const resFile = zip.file('resolutions.json');
-        let resolutions = {};
+        rv_resolutions = {};
         if (resFile) {
-            resolutions = JSON.parse(await resFile.async('string'));
+            rv_resolutions = JSON.parse(await resFile.async('string'));
+        }
+
+        // Load plaza mapping if present
+        const plazaFile = zip.file('plaza_mapping.json');
+        rv_plazaMapping = {};
+        if (plazaFile) {
+            rv_plazaMapping = JSON.parse(await plazaFile.async('string'));
         }
 
         // Store raw data and process for intrazonal trips
         rv_odDataRaw = result.data;
-        rvDetectIntrazonalTrips(result.data, resolutions);
+        // Identify intrazonal trips using Resolved_rawOD if available, else fallback
+        if (result.resolved_raw_od && result.resolved_raw_od.length > 0) {
+            rvDetectIntrazonalTripsFromRaw(result.resolved_raw_od, rv_resolutions);
+        } else {
+            rvDetectIntrazonalTrips(result.data, rv_resolutions);
+        }
         rv_dataLoaded = true;
+
+        // Show validator name dialog
+        rvShowValidatorDialog();
 
     } catch (err) {
         console.error('R&V data parsing failed:', err);
@@ -336,7 +366,7 @@ function rvDetectIntrazonalTripsFromPlaces(places, resolutions) {
                 // Check for Intrazonal match
                 if (oZoneClean === dZoneClean) {
                     const key = `${oZoneClean}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
-                    
+
                     if (!tripMap.has(key)) {
                         tripMap.set(key, {
                             zone: oZoneClean,
@@ -348,7 +378,7 @@ function rvDetectIntrazonalTripsFromPlaces(places, resolutions) {
                             originCoords: oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null,
                             destCoords: dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null,
                             // To find commodities, we need the parent place's interactions
-                            parentPlace: place 
+                            parentPlace: place
                         });
                     }
 
@@ -363,7 +393,7 @@ function rvDetectIntrazonalTripsFromPlaces(places, resolutions) {
     rv_intrazonalData = Array.from(tripMap.values());
     // Sort by trip count descending
     rv_intrazonalData.sort((a, b) => b.tripCount - a.tripCount);
-    
+
     rvRenderIntrazonalTable();
 
     if (!rv_mapInitialized) {
@@ -373,6 +403,78 @@ function rvDetectIntrazonalTripsFromPlaces(places, resolutions) {
 
 /**
  * Detect intrazonal trips from raw API response data (e.g. from File Upload).
+ */
+/**
+ * NEW: Detect intrazonal trips directly from Resolved_rawOD rows.
+ * This is the most accurate method as it uses the exact columns specified by the user.
+ */
+function rvDetectIntrazonalTripsFromRaw(rawRows, resolutions) {
+    rv_intrazonalData = [];
+    const tripMap = new Map(); // Key: "zone|origin|destination"
+    const resolutionsUpper = {};
+
+    for (const [k, v] of Object.entries(resolutions || {})) {
+        resolutionsUpper[k.toUpperCase()] = v;
+    }
+
+    if (!rawRows || !Array.isArray(rawRows)) return;
+
+    for (const row of rawRows) {
+        const oZone = rvCleanZoneId(row.ORIGIN_ZONE);
+        const dZone = rvCleanZoneId(row.DESTINATION_ZONE);
+
+        // Analysis: Check if ORIGIN_ZONE == DESTINATION_ZONE
+        // Omit if both columns have value 0 (user request) or if zones are Unknown (unresolved)
+        if (oZone !== '0' && oZone !== '' && oZone !== 'Unknown' && oZone === dZone) {
+            const oName = (row.ORIGIN || '').trim();
+            const dName = (row.DESTINATION || '').trim();
+            const vClass = (row.MAV_SPLIT || row.VEHICLE_CODE || 'Unknown').trim();
+
+            // We'll treat every row as 1 trip (or use a count column if it exists, though Raw usually means 1 row = 1 record)
+            const count = 1;
+
+            const key = `${oZone}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
+
+            if (!tripMap.has(key)) {
+                const oRes = rvGetResolvedData(oName, resolutionsUpper);
+                const dRes = rvGetResolvedData(dName, resolutionsUpper);
+
+                tripMap.set(key, {
+                    zone: oZone,
+                    originalZone: oZone, // Keep track of original zone for export matching
+                    origin: oName,
+                    originalOrigin: oName, // Keep track of the original name for export matching
+                    destination: dName,
+                    originalDestination: dName, // Keep track of the original name for export matching
+                    tripCount: 0,
+                    vehicleBreakdown: {},
+                    status: 'Pending',
+                    originCoords: oRes ? (oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null) : null,
+                    destCoords: dRes ? (dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null) : null,
+                    // Note: parentPlace is harder to link here, but we can store the raw row ref if needed
+                    rawRows: []
+                });
+            }
+
+            const trip = tripMap.get(key);
+            trip.tripCount += count;
+            trip.vehicleBreakdown[vClass] = (trip.vehicleBreakdown[vClass] || 0) + count;
+            trip.rawRows.push(row);
+        }
+    }
+
+    rv_intrazonalData = Array.from(tripMap.values());
+    rv_intrazonalData.sort((a, b) => b.tripCount - a.tripCount);
+
+    rvRenderIntrazonalTable();
+
+    if (!rv_mapInitialized) {
+        rvInitMap();
+    }
+}
+
+/**
+ * Detect intrazonal trips from processed analytics data (Fallback).
  */
 function rvDetectIntrazonalTrips(apiData, resolutions) {
     rv_intrazonalData = [];
@@ -432,7 +534,7 @@ function rvDetectIntrazonalTrips(apiData, resolutions) {
 
     rv_intrazonalData = Array.from(tripMap.values());
     rv_intrazonalData.sort((a, b) => b.tripCount - a.tripCount);
-    
+
     rvRenderIntrazonalTable();
 
     if (!rv_mapInitialized) {
@@ -466,7 +568,7 @@ function rvRenderIntrazonalTable() {
     rv_intrazonalData.forEach((trip, idx) => {
         const statusClass = trip.status === 'Pending' ? 'rv-status-pending'
             : trip.status === 'Removed from data' ? 'rv-status-removed'
-            : 'rv-status-resolved';
+                : 'rv-status-resolved';
 
         html += `
             <tr class="rv-data-row ${trip.status === 'Removed from data' ? 'rv-row-removed' : ''}" id="rv-row-${idx}">
@@ -519,6 +621,17 @@ async function rvMapView(idx) {
     const trip = rv_intrazonalData[idx];
     if (!trip) return;
 
+    // Reset Edit State for new map
+    rv_editingTripIdx = idx;
+    rvCloseSearch(true);
+    rv_isEditMode = true; // Automatically enable edit mode
+    document.getElementById('rv-map').classList.add('editing-map');
+
+    const editBar = document.getElementById('rv-edit-bar');
+    if (editBar) {
+        editBar.style.display = 'none'; // Hide until search is active
+    }
+
     // Highlight selected row
     document.querySelectorAll('.rv-data-row').forEach(r => r.classList.remove('rv-row-active'));
     const row = document.getElementById(`rv-row-${idx}`);
@@ -567,7 +680,10 @@ async function rvMapView(idx) {
                 strokeColor: '#fff',
                 strokeWeight: 2
             },
-            title: `Origin: ${trip.origin}`
+            title: `Origin`
+        });
+        marker.addListener('click', () => {
+            if (rv_isEditMode) rvStartRelocate('O');
         });
         rv_markers.push(marker);
     }
@@ -585,7 +701,10 @@ async function rvMapView(idx) {
                 strokeColor: '#fff',
                 strokeWeight: 2
             },
-            title: `Destination: ${trip.destination}`
+            title: `Destination`
+        });
+        marker.addListener('click', () => {
+            if (rv_isEditMode) rvStartRelocate('D');
         });
         rv_markers.push(marker);
     }
@@ -644,6 +763,94 @@ async function rvMapView(idx) {
     }
 }
 
+/* ── Edit Mode Functions ─────────────────────────────────────────────────────── */
+
+function rvStartRelocate(point) {
+    rv_editingPoint = point;
+    const bar = document.getElementById('rv-edit-bar');
+    const label = document.getElementById('rv-edit-point-label');
+    const input = document.getElementById('rv-edit-search-input');
+
+    // Update label and placeholder
+    label.textContent = point === 'O' ? 'Origin' : 'Dest';
+    if (point === 'O') input.placeholder = "Search new Origin location...";
+    else input.placeholder = "Search new Destination location...";
+
+    input.value = '';
+    input.disabled = false;
+
+    // Show the bar and focus
+    bar.style.display = 'flex';
+    setTimeout(() => input.focus(), 50);
+
+    // Initialize autocomplete once
+    if (!rv_autocompleteInstance) {
+        rv_autocompleteInstance = new google.maps.places.Autocomplete(input);
+        rv_autocompleteInstance.addListener('place_changed', rvHandlePlaceSelection);
+    }
+}
+
+function rvCloseSearch(silent = false) {
+    const bar = document.getElementById('rv-edit-bar');
+    if (bar) {
+        bar.style.display = 'none';
+    }
+
+    const input = document.getElementById('rv-edit-search-input');
+    if (input) {
+        input.value = '';
+        input.disabled = true;
+    }
+    rv_editingPoint = null;
+}
+
+async function rvHandlePlaceSelection() {
+    if (!rv_autocompleteInstance || rv_editingTripIdx === -1 || !rv_editingPoint) return;
+
+    const place = rv_autocompleteInstance.getPlace();
+    if (!place.geometry) {
+        alert("No details available for input: '" + place.name + "'");
+        return;
+    }
+
+    const newLat = place.geometry.location.lat();
+    const newLng = place.geometry.location.lng();
+    const newName = place.name;
+    const trip = rv_intrazonalData[rv_editingTripIdx];
+
+    try {
+        // Fetch new zone
+        const resp = await fetch(`/api/zone?lat=${newLat}&lng=${newLng}`);
+        const data = await resp.json();
+        const newZone = rvCleanZoneId(data.zone);
+
+        if (rv_editingPoint === 'O') {
+            trip.originCoords = { lat: newLat, lng: newLng };
+            trip.origin = newName;
+            trip.zone = newZone; // Update zone
+        } else {
+            trip.destCoords = { lat: newLat, lng: newLng };
+            trip.destination = newName;
+            trip.zone = newZone; // Update zone
+        }
+
+        // Update status if inter-zonal
+        if (newZone !== 'Unknown' && rvCleanZoneId(trip.zone) !== 'Unknown') {
+            trip.status = 'Edited';
+            alert('Location updated successfully.');
+        }
+
+        rvCloseSearch();
+        rvSave(); // autosave
+        rvRenderIntrazonalTable(); // Refresh table view
+        rvMapView(rv_editingTripIdx); // redraw map
+
+    } catch (err) {
+        console.error("Error updating location:", err);
+        alert("Failed to update location.");
+    }
+}
+
 /**
  * Toggle details dropdown for a row.
  */
@@ -671,25 +878,37 @@ function rvShowDetails(idx) {
             const count = trip.vehicleBreakdown[vClass];
             let commodities = [];
 
-            // Search in commodity interactions
-            const matrices = [analytics.commodityInteractionsAbstract, analytics.commodityInteractionsDetailed];
-            for (const matrix of matrices) {
-                if (!matrix) continue;
-                for (const [code, vehicleMap] of Object.entries(matrix)) {
-                    const interactions = vehicleMap[vClass];
-                    if (Array.isArray(interactions)) {
-                        for (const inter of interactions) {
-                            if (inter.toUpperCase().startsWith(pairKey)) {
-                                commodities.push(code);
-                                break;
+            // Case 1: Detect from analytics (Zone/Place assign mode fallback)
+            if (trip.parentPlace) {
+                const matrices = [analytics.commodityInteractionsAbstract, analytics.commodityInteractionsDetailed];
+                for (const matrix of matrices) {
+                    if (!matrix) continue;
+                    for (const [code, vehicleMap] of Object.entries(matrix)) {
+                        const interactions = vehicleMap[vClass];
+                        if (Array.isArray(interactions)) {
+                            for (const inter of interactions) {
+                                if (inter.toUpperCase().startsWith(pairKey)) {
+                                    commodities.push(code);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
-            
+            // Case 2: Detect from rawRows (Direct R&V mode from Resolved_rawOD)
+            else if (trip.rawRows) {
+                for (const row of trip.rawRows) {
+                    const rowVeh = (row.MAV_SPLIT || row.VEHICLE_CODE || '').trim();
+                    if (rowVeh === vClass) {
+                        if (row.COMMODITY_CODE_ABSTRACT) commodities.push(row.COMMODITY_CODE_ABSTRACT);
+                        if (row.COMMODITY_CODE_DETAILED) commodities.push(row.COMMODITY_CODE_DETAILED);
+                    }
+                }
+            }
+
             // Deduplicate commodities
-            commodities = [...new Set(commodities)];
+            commodities = [...new Set(commodities)].filter(c => c && c !== '0' && c !== 'NAN');
 
             vehicleHtml += `
                 <div class="rv-vehicle-detail-row">
@@ -843,34 +1062,136 @@ function rvSave() {
     }
 }
 
-function rvExport() {
+async function rvExport() {
     if (rv_intrazonalData.length === 0) {
         alert('No data to export.');
         return;
     }
 
-    // Build CSV
-    const headers = ['S.No', 'Zone No.', 'Origin', 'Destination', 'Trip Count', 'Status'];
-    const rows = rv_intrazonalData.map((trip, idx) => [
-        idx + 1,
-        trip.zone,
-        `"${(trip.origin || '').replace(/"/g, '""')}"`,
-        `"${(trip.destination || '').replace(/"/g, '""')}"`,
-        trip.tripCount,
-        trip.status
-    ]);
+    if (!rv_validatorName) {
+        alert('Validator name is required. Please enter your name.');
+        rvShowValidatorDialog();
+        return;
+    }
 
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ODIN_Intrazonal_Trips_${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Build updated resolutions from intrazonal edits
+    const updatedResolutions = JSON.parse(JSON.stringify(rv_resolutions));
+    for (const trip of rv_intrazonalData) {
+        if (trip.status === 'Edited' || trip.status === 'Resolved') {
+            // Update the resolution entry for the edited origin/destination
+            if (trip.origin && trip.originCoords) {
+                const key = trip.originalOrigin || trip.origin;
+                updatedResolutions[key] = updatedResolutions[key] || {};
+                updatedResolutions[key].name = trip.origin;
+                updatedResolutions[key].lat = trip.originCoords.lat;
+                updatedResolutions[key].lng = trip.originCoords.lng;
+                updatedResolutions[key].zone = trip.zone;
+                updatedResolutions[key].resolved_by = 'R&V Edit';
+            }
+            if (trip.destination && trip.destCoords) {
+                const key = trip.originalDestination || trip.destination;
+                updatedResolutions[key] = updatedResolutions[key] || {};
+                updatedResolutions[key].name = trip.destination;
+                updatedResolutions[key].lat = trip.destCoords.lat;
+                updatedResolutions[key].lng = trip.destCoords.lng;
+                updatedResolutions[key].zone = trip.zone;
+                updatedResolutions[key].resolved_by = 'R&V Edit';
+            }
+        }
+    }
+
+    const btn = document.getElementById('rv-export-btn');
+    const origText = btn ? btn.innerHTML : 'Export';
+    if (btn) btn.innerHTML = '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;display:inline-block;margin-right:6px;"></span> Exporting...';
+
+    try {
+        const formData = new FormData();
+        formData.append('mapping', JSON.stringify(updatedResolutions));
+        formData.append('plaza_mapping', JSON.stringify(rv_plazaMapping));
+        formData.append('validator_name', rv_validatorName);
+        formData.append('rv_intrazonal_data', JSON.stringify(rv_intrazonalData));
+
+        if (rv_projectOdBlob) {
+            formData.append('excel_file', rv_projectOdBlob);
+        }
+        if (rv_projectShpBlob) {
+            formData.append('shapefile_zip', rv_projectShpBlob);
+        }
+
+        const resp = await fetch('/api/export/rv_progress', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ODIN_RV_Export_Project.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        alert('Export successful!');
+    } catch (err) {
+        console.error('R&V Export failed:', err);
+        alert('Export failed: ' + err.message);
+    } finally {
+        if (btn) btn.innerHTML = origText;
+    }
 }
+
+// ── Validator Dialog ─────────────────────────────────────────────────────────
+
+function rvShowValidatorDialog() {
+    const overlay = document.getElementById('rv-validator-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const input = document.getElementById('rv-validator-input');
+    const btn = document.getElementById('rv-validator-btn');
+
+    // Reset
+    input.value = '';
+    btn.disabled = true;
+
+    // Enable button when text is entered
+    input.oninput = () => {
+        btn.disabled = input.value.trim().length === 0;
+    };
+
+    // Allow Enter key to submit
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter' && input.value.trim().length > 0) {
+            rvSubmitValidatorName();
+        }
+    };
+
+    setTimeout(() => input.focus(), 100);
+}
+
+function rvSubmitValidatorName() {
+    const input = document.getElementById('rv-validator-input');
+    const name = input ? input.value.trim() : '';
+
+    if (!name) {
+        alert('Please enter your name.');
+        return;
+    }
+
+    rv_validatorName = name;
+
+    // Update the user display in the header if it exists
+    const userDisplay = document.getElementById('rv-current-user');
+    if (userDisplay) userDisplay.textContent = name;
+
+    // Close dialog
+    const overlay = document.getElementById('rv-validator-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
 
 // ── User Dropdown ────────────────────────────────────────────────────────────
 

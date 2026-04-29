@@ -47,6 +47,7 @@
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insight Navigator</p>
+                <div id="odin-version-display" class="odin-version-tag">v2.5.1</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()" style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -873,11 +874,38 @@
                                 <p>Map will load here</p>
                             </div>
                         </div>
+                        <!-- R&V Edit Bar (Glassmorphism) — sibling of map so it overlays correctly -->
+                        <div class="rv-edit-bar" id="rv-edit-bar" style="display: none;">
+                            <div class="rv-edit-search-container" id="rv-edit-search-container">
+                                <span class="rv-edit-point-label" id="rv-edit-point-label">O</span>
+                                <input type="text" id="rv-edit-search-input" class="rv-edit-search-input" placeholder="Search location..." disabled>
+                                <button class="rv-edit-close-search" onclick="rvCloseSearch()" title="Cancel Search">✕</button>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </main>
         </div>
     </div>
+
+    <!-- R&V Validator Name Dialog -->
+    <div class="rv-validator-overlay" id="rv-validator-overlay" style="display: none;">
+        <div class="rv-validator-dialog">
+            <div class="rv-validator-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+            </div>
+            <h3 class="rv-validator-title">Validator Identification</h3>
+            <p class="rv-validator-desc">Please enter your name to proceed with the review.</p>
+            <input type="text" id="rv-validator-input" class="rv-validator-input" placeholder="Enter your name..." autocomplete="off" />
+            <button class="rv-validator-btn" id="rv-validator-btn" onclick="rvSubmitValidatorName()" disabled>
+                Proceed to Review
+            </button>
+        </div>
+    </div>
+
 </body>
 
 </html>

@@ -11,22 +11,29 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
     
     if "Auto_OD_input" not in xl.sheet_names:
         raise ValueError("Sheet 'Auto_OD_input' not found in the uploaded Excel file.")
-    
-    df_main = xl.parse("Auto_OD_input")
+
+    def clean_df(df):
+        """Ensures a DataFrame is JSON-serializable by replacing NaN/Inf with None."""
+        if df is None: return None
+        # Must explicitly cast to object to prevent pandas from casting None back to NaN in float columns
+        df = df.astype(object)
+        return df.replace([float('inf'), float('-inf')], None).where(pd.notnull(df), None)
+
+    df_main = clean_df(xl.parse("Auto_OD_input"))
     
     print(f"Parsed Auto_OD_input. Shape: {df_main.shape}")
     print(f"Columns: {df_main.columns.tolist()}")
     
     ca_codes_abstract = []
     if "CA_code_ABSTRACT" in xl.sheet_names:
-        ca_codes_abstract = xl.parse("CA_code_ABSTRACT").to_dict(orient="records")
+        ca_codes_abstract = clean_df(xl.parse("CA_code_ABSTRACT")).to_dict(orient="records")
     elif "CA_code" in xl.sheet_names:
         # Fallback for older files
-        ca_codes_abstract = xl.parse("CA_code").to_dict(orient="records")
+        ca_codes_abstract = clean_df(xl.parse("CA_code")).to_dict(orient="records")
         
     ca_codes_detailed = []
     if "CA_code_DETAILED" in xl.sheet_names:
-        ca_codes_detailed = xl.parse("CA_code_DETAILED").to_dict(orient="records")
+        ca_codes_detailed = clean_df(xl.parse("CA_code_DETAILED")).to_dict(orient="records")
         
     # OD_code parsing remains for Place assign mode
 
@@ -51,11 +58,18 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
                 if name_val and name_val != 'NAN' and zone_val and zone_val != 'NAN':
                     od_codes[name_val] = zone_val
 
+    # [R&V MODE] NEW: Parse Resolved_rawOD if it exists
+    resolved_raw_od = []
+    if "Resolved_rawOD" in xl.sheet_names:
+        # Ensure JSON serializability by replacing NaN/Nat/Inf with None
+        resolved_raw_od = clean_df(xl.parse("Resolved_rawOD")).to_dict(orient="records")
+
     return {
         "main_data": df_main.to_dict(orient="records"),
         "ca_codes_abstract": ca_codes_abstract,
         "ca_codes_detailed": ca_codes_detailed,
-        "od_codes": od_codes
+        "od_codes": od_codes,
+        "resolved_raw_od": resolved_raw_od
     }
 
 

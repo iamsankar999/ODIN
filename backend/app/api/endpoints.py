@@ -124,13 +124,54 @@ async def upload_excel(
             parsed_data["ca_codes_abstract"], # Default to abstract for initial processing logic if needed, but processor now handles both
             od_codes=parsed_data.get("od_codes", {})
         )
-        return {
+        def clean_json(obj):
+            import math
+            import numpy as np
+
+            # Recurse into containers
+            if isinstance(obj, list):
+                return [clean_json(x) for x in obj]
+            if isinstance(obj, dict):
+                return {k: clean_json(v) for k, v in obj.items()}
+
+            # Convert numpy types to native Python FIRST
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                val = float(obj)
+                if math.isnan(val) or math.isinf(val):
+                    return None
+                return val
+
+            # Handle standard Python float NaN/Inf
+            if isinstance(obj, float):
+                if math.isnan(obj) or math.isinf(obj):
+                    return None
+
+            # Catch-all for any remaining null-like values (None, NaT, etc.)
+            if obj is None:
+                return None
+            try:
+                # Safely check for pandas NA types (NaT, NA, etc.)
+                import pandas as pd
+                if pd.isna(obj):
+                    return None
+            except (ValueError, TypeError):
+                pass
+
+            return obj
+
+        response_data = {
             "message": "Excel file parsed successfully",
             "total_rows": len(parsed_data["main_data"]),
             "ca_codes_abstract": parsed_data.get("ca_codes_abstract", []),
             "ca_codes_detailed": parsed_data.get("ca_codes_detailed", []),
+            "resolved_raw_od": parsed_data.get("resolved_raw_od", []),
             "data": processed_data
         }
+        return clean_json(response_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -174,9 +215,11 @@ def get_zone(lat: float, lng: float):
             if row['geometry'].contains(point):
                 # Try to find a reasonable identifier column 
                 zone_val = None
-                for col_candidate in ['ZONE_NO', 'Zone', 'zone', 'ZONE', 'ID', 'Name', 'NAME']:
-                    if col_candidate in global_gdf.columns:
-                        zone_val = str(row[col_candidate])
+                potential_names = ['ZONENUMBER', 'ZONENUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']
+                cols_upper = {c.upper(): c for c in global_gdf.columns}
+                for p in potential_names:
+                    if p in cols_upper:
+                        zone_val = str(row[cols_upper[p]])
                         break
                 
                 # If no clear column is found, fallback to index
@@ -277,6 +320,62 @@ async def export_progress(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Progress export failed: {str(e)}")
 
+from app.core.exporter import generate_rv_progress_excel
+
+@router.post("/export/rv_progress")
+async def export_rv_progress(
+    mapping: str = Form(...),
+    excel_file: UploadFile = File(None),
+    shapefile_zip: UploadFile = File(None),
+    plaza_mapping: Optional[str] = Form(None),
+    validator_name: Optional[str] = Form(None),
+    rv_intrazonal_data: Optional[str] = Form(None)
+):
+    try:
+        mapping_dict = json.loads(mapping)
+        plaza_mapping_dict = json.loads(plaza_mapping) if plaza_mapping else {}
+        intrazonal_list = json.loads(rv_intrazonal_data) if rv_intrazonal_data else []
+        v_name = validator_name or ''
+
+        excel_bytes = None
+        if excel_file is not None:
+            excel_bytes = await excel_file.read()
+
+        gdf = None
+        shape_bytes = None
+        if shapefile_zip is not None:
+            shape_bytes = await shapefile_zip.read()
+            gdf = process_shapefile_zip(shape_bytes)
+
+        # 1. Generate Resolved Places Excel (same as Zone Assign) with validator name column
+        resolved_xlsx = generate_rv_progress_excel(mapping_dict, gdf, excel_bytes, intrazonal_list, v_name)
+
+        # 2. Generate Survey Locations Excel
+        survey_xlsx = generate_survey_locations_excel(plaza_mapping_dict)
+
+        # 3. Bundle into ZIP (exact same format as Zone Assign)
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr("ODIN_Resolved_OD_Dataset.xlsx", resolved_xlsx)
+            zip_file.writestr("ODIN_Survey_Location_Mapping.xlsx", survey_xlsx)
+
+            if shape_bytes:
+                zip_file.writestr("Shapefile_Original.zip", shape_bytes)
+
+            # Metadata for re-opening
+            zip_file.writestr("resolutions.json", mapping)
+            if plaza_mapping:
+                zip_file.writestr("plaza_mapping.json", plaza_mapping)
+
+        zip_buffer.seek(0)
+
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=ODIN_RV_Export_Project.zip"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"R&V Progress export failed: {str(e)}")
 # --- IHMCL Base Number Endpoints ---
 
 @router.get("/ihmcl/plazas")

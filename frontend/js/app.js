@@ -182,6 +182,12 @@ async function checkForUpdates() {
         if (!resp.ok) return;
         const data = await resp.json();
 
+        // Update the intro version tag
+        const localTag = document.getElementById('odin-version-display');
+        if (localTag && data.local_version) {
+            localTag.textContent = `v${data.local_version}`;
+        }
+
         if (data.update_available) {
             const banner = document.getElementById('update-banner');
             const tagEl = document.getElementById('update-version-tag');
@@ -2409,7 +2415,7 @@ async function renderCurrentPlace() {
         });
     }
 }
-function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
+async function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
     const place = unmatchedPlaces[currentIndex];
 
     const resolveData = {
@@ -2448,8 +2454,10 @@ function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
 
     // Fetches zone in background if missing
     if (resolveData.zone === "Unknown" || resolveData.zone === "Calculating...") {
-        fetchZoneForLocation(suggestion.lat, suggestion.lng).then(data => {
+        try {
+            const data = await fetchZoneForLocation(suggestion.lat, suggestion.lng);
             if (data && data.zone) {
+                resolveData.zone = data.zone;
                 if (selectedPlazas) {
                     selectedPlazas.forEach(p => {
                         if (resolvedPlaces[place.original_name][p]) resolvedPlaces[place.original_name][p].zone = data.zone;
@@ -2458,7 +2466,9 @@ function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
                     resolvedPlaces[place.original_name]["__all__"].zone = data.zone;
                 }
             }
-        });
+        } catch (error) {
+            console.error("Failed to fetch zone", error);
+        }
     }
 
     // Check if fully resolved

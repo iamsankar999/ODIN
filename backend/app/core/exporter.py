@@ -292,3 +292,85 @@ def generate_survey_locations_excel(plaza_mapping: Dict[str, Any]) -> bytes:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Survey_Locations', index=False)
     return output.getvalue()
+
+def generate_rv_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes, intrazonal_list: list, validator_name: str) -> bytes:
+    """
+    Takes the original ODIN_Resolved_OD_Dataset.xlsx and the modified R&V mapping/intrazonal data.
+    Updates the Resolved_rawOD sheet and the Resolved_Places sheet.
+    Adds the Validator name column to Resolved_Places.
+    Returns the updated Excel file as bytes.
+    """
+    xl = pd.ExcelFile(BytesIO(original_excel_bytes))
+    output = BytesIO()
+    
+    modified_trips = {}
+    for trip in intrazonal_list:
+        if trip.get('status') in ['Edited', 'Resolved']:
+            o_zone = str(trip.get('originalZone', '')).strip().upper()
+            o_name = str(trip.get('originalOrigin', '')).strip().upper()
+            d_name = str(trip.get('originalDestination', '')).strip().upper()
+            modified_trips[(o_zone, o_name, d_name)] = trip
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name in xl.sheet_names:
+            df = xl.parse(sheet_name)
+            
+            if sheet_name == 'Resolved_rawOD':
+                # Update rows based on modifications
+                for idx, row in df.iterrows():
+                    o_zone = str(row.get('ORIGIN_ZONE', '')).strip().upper()
+                    o_name = str(row.get('ORIGIN', '')).strip().upper()
+                    d_name = str(row.get('DESTINATION', '')).strip().upper()
+                    
+                    trip = modified_trips.get((o_zone, o_name, d_name))
+                    if trip:
+                        if 'origin' in trip:
+                            df.at[idx, 'ORIGIN'] = trip['origin']
+                        if 'destination' in trip:
+                            df.at[idx, 'DESTINATION'] = trip['destination']
+                        if trip.get('origin') != trip.get('originalOrigin'):
+                            df.at[idx, 'ORIGIN_ZONE'] = trip.get('zone', '')
+                        if trip.get('destination') != trip.get('originalDestination'):
+                            df.at[idx, 'DESTINATION_ZONE'] = trip.get('zone', '')
+                        if trip.get('origin') == trip.get('originalOrigin') and trip.get('destination') == trip.get('originalDestination'):
+                            df.at[idx, 'ORIGIN_ZONE'] = trip.get('zone', '')
+                            df.at[idx, 'DESTINATION_ZONE'] = trip.get('zone', '')
+            
+            elif sheet_name == 'Resolved_Places':
+                # Update using the mapping dictionary
+                if 'Validator name' not in df.columns:
+                    df['Validator name'] = validator_name
+                else:
+                    df['Validator name'] = validator_name
+                
+                for idx, row in df.iterrows():
+                    orig_name = str(row.get('Original Name', ''))
+                    survey_loc = str(row.get('Survey Location', ''))
+                    
+                    entry = mapping.get(orig_name)
+                    if entry:
+                        res_data = None
+                        if isinstance(entry, dict) and any(isinstance(v, dict) for v in entry.values()):
+                            if survey_loc in entry:
+                                res_data = entry[survey_loc]
+                            elif '__all__' in entry:
+                                res_data = entry['__all__']
+                        else:
+                            res_data = entry
+                            
+                        if res_data:
+                            if 'name' in res_data:
+                                df.at[idx, 'Resolved Name'] = res_data['name']
+                            if 'lat' in res_data:
+                                df.at[idx, 'Latitude'] = res_data['lat']
+                            if 'lng' in res_data:
+                                df.at[idx, 'Longitude'] = res_data['lng']
+                            if 'zone' in res_data:
+                                df.at[idx, 'Zone Number'] = clean_zone_export(res_data['zone'])
+                            if 'resolved_by' in res_data:
+                                df.at[idx, 'Resolved By'] = res_data['resolved_by']
+                            df.at[idx, 'Validator name'] = validator_name
+                            
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+    return output.getvalue()
