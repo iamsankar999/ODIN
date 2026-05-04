@@ -339,9 +339,9 @@ def generate_rv_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDa
             elif sheet_name == 'Resolved_Places':
                 # Update using the mapping dictionary
                 if 'Validator name' not in df.columns:
-                    df['Validator name'] = validator_name
+                    df['Validator name'] = ""
                 else:
-                    df['Validator name'] = validator_name
+                    df['Validator name'] = ""
                 
                 for idx, row in df.iterrows():
                     orig_name = str(row.get('Original Name', ''))
@@ -369,7 +369,9 @@ def generate_rv_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDa
                                 df.at[idx, 'Zone Number'] = clean_zone_export(res_data['zone'])
                             if 'resolved_by' in res_data:
                                 df.at[idx, 'Resolved By'] = res_data['resolved_by']
-                            df.at[idx, 'Validator name'] = validator_name
+                            
+                            if res_data.get('resolved_by') == 'R&V Edit':
+                                df.at[idx, 'Validator name'] = validator_name
                             
             df.to_excel(writer, sheet_name=sheet_name, index=False)
             

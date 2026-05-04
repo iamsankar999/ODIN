@@ -11,8 +11,11 @@ let rv_map = null;                    // Google Maps instance for R&V
 let rv_mapInitialized = false;
 let rv_currentSubTab = 'intrazonal';  // 'intrazonal' | 'illogical'
 let rv_intrazonalData = [];           // Detected intrazonal trips
+let rv_illogicalData = [];            // Detected illogical pairs
 let rv_markers = [];                  // Active map markers
 let rv_polylines = [];                // Active route polylines
+let rv_suggestionMarkers = [];        // Temporary markers for suggestions
+let rv_activeInfoWindow = null;       // Active popup info window
 let rv_zoneBoundary = null;           // Active zone polygon overlay
 let rv_odDataRaw = null;              // Raw parsed OD data rows
 let rv_shapefileGdf = null;           // Shapefile loaded flag
@@ -158,6 +161,10 @@ function rvToggleSubTab(tab) {
         intraContent.classList.remove('active');
         illoContent.classList.add('active');
     }
+
+    // Refresh map when switching tabs
+    rvClearMap();
+    document.querySelectorAll('.rv-data-row').forEach(r => r.classList.remove('rv-row-active'));
 }
 
 // ── Data Loading ─────────────────────────────────────────────────────────────
@@ -168,9 +175,14 @@ function rvToggleSubTab(tab) {
  * - Otherwise open a file picker to load a ZIP.
  */
 async function rvLoadData() {
+    const btn = document.getElementById('rv-load-data-btn') || document.querySelector('.rv-toolbar-left .rv-btn-primary');
+    const origText = btn ? btn.innerHTML : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> Load Data';
+    if (btn) btn.innerHTML = '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;display:inline-block;margin-right:6px;"></span> Processing...';
+
     // If we already have processed OD data from the main app, reprocess it
     if (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0) {
         rvProcessLoadedData();
+        if (btn) btn.innerHTML = origText;
         return;
     }
 
@@ -197,7 +209,10 @@ async function rvLoadData() {
             });
         }
 
-        if (!file) return;
+        if (!file) {
+            if (btn) btn.innerHTML = origText;
+            return;
+        }
         await rvParseProjectZip(file);
     } catch (err) {
         if (err.name !== 'AbortError') {
@@ -205,6 +220,7 @@ async function rvLoadData() {
             alert('Failed to load data: ' + err.message);
         }
     }
+    if (btn) btn.innerHTML = origText;
 }
 
 /**
@@ -285,8 +301,10 @@ async function rvParseProjectZip(file) {
         // Identify intrazonal trips using Resolved_rawOD if available, else fallback
         if (result.resolved_raw_od && result.resolved_raw_od.length > 0) {
             rvDetectIntrazonalTripsFromRaw(result.resolved_raw_od, rv_resolutions);
+            rvDetectIllogicalTripsFromRaw(result.resolved_raw_od, rv_resolutions);
         } else {
             rvDetectIntrazonalTrips(result.data, rv_resolutions);
+            rvDetectIllogicalTrips(result.data, rv_resolutions);
         }
         rv_dataLoaded = true;
 
@@ -316,6 +334,7 @@ function rvProcessLoadedData() {
     }
 
     rvDetectIntrazonalTripsFromPlaces(data, resolutions);
+    rvDetectIllogicalTrips(data, resolutions);
     rv_dataLoaded = true;
 }
 
@@ -430,8 +449,15 @@ function rvDetectIntrazonalTripsFromRaw(rawRows, resolutions) {
             const dName = (row.DESTINATION || '').trim();
             const vClass = (row.MAV_SPLIT || row.VEHICLE_CODE || 'Unknown').trim();
 
-            // We'll treat every row as 1 trip (or use a count column if it exists, though Raw usually means 1 row = 1 record)
             const count = 1;
+
+            const pName = (row.SURVEY_LOCATION || row.PLAZA_NAME || row.PLAZA || '').trim();
+            let pCoords = null;
+            if (pName) {
+                const keys = Object.keys(rv_plazaMapping);
+                const match = keys.find(k => k.toLowerCase() === pName.toLowerCase());
+                if (match) pCoords = rv_plazaMapping[match];
+            }
 
             const key = `${oZone}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
 
@@ -441,17 +467,18 @@ function rvDetectIntrazonalTripsFromRaw(rawRows, resolutions) {
 
                 tripMap.set(key, {
                     zone: oZone,
-                    originalZone: oZone, // Keep track of original zone for export matching
+                    originalZone: oZone,
                     origin: oName,
-                    originalOrigin: oName, // Keep track of the original name for export matching
+                    originalOrigin: oName,
                     destination: dName,
-                    originalDestination: dName, // Keep track of the original name for export matching
+                    originalDestination: dName,
+                    plaza: pName,
                     tripCount: 0,
                     vehicleBreakdown: {},
                     status: 'Pending',
                     originCoords: oRes ? (oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null) : null,
                     destCoords: dRes ? (dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null) : null,
-                    // Note: parentPlace is harder to link here, but we can store the raw row ref if needed
+                    plazaCoords: pCoords,
                     rawRows: []
                 });
             }
@@ -488,45 +515,62 @@ function rvDetectIntrazonalTrips(apiData, resolutions) {
     if (!apiData || !Array.isArray(apiData)) return;
 
     for (const item of apiData) {
-        if (!item.analytics || !item.analytics.vehicleInteractions) continue;
+        if (!item.analytics || (!item.analytics.vehicleInteractions && !item.analytics.vehicleInteractionsPlaza)) continue;
 
-        for (const [vehicleClass, interactions] of Object.entries(item.analytics.vehicleInteractions)) {
-            if (!Array.isArray(interactions)) continue;
+        const iteratePlazas = item.analytics.vehicleInteractionsPlaza
+            ? Object.entries(item.analytics.vehicleInteractionsPlaza)
+            : [['', item.analytics.vehicleInteractions]];
 
-            for (const interStr of interactions) {
-                const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
-                if (!match) continue;
+        for (const [plazaName, vehicleInteractions] of iteratePlazas) {
+            for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
+                if (!Array.isArray(interactions)) continue;
 
-                const oName = match[1].trim();
-                const dName = match[2].trim();
-                const count = parseInt(match[3], 10);
+                for (const interStr of interactions) {
+                    const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
+                    if (!match) continue;
 
-                const oRes = rvGetResolvedData(oName, resolutionsUpper);
-                const dRes = rvGetResolvedData(dName, resolutionsUpper);
+                    const oName = match[1].trim();
+                    const dName = match[2].trim();
+                    const count = parseInt(match[3], 10);
 
-                if (!oRes || !dRes) continue;
+                    const oRes = rvGetResolvedData(oName, resolutionsUpper);
+                    const dRes = rvGetResolvedData(dName, resolutionsUpper);
 
-                const oZoneClean = rvCleanZoneId(oRes.zone);
-                const dZoneClean = rvCleanZoneId(dRes.zone);
+                    if (!oRes || !dRes) continue;
 
-                if (oZoneClean !== 'Unknown' && oZoneClean === dZoneClean) {
-                    const key = `${oZoneClean}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
-                    if (!tripMap.has(key)) {
-                        tripMap.set(key, {
-                            zone: oZoneClean,
-                            origin: oName,
-                            destination: dName,
-                            tripCount: 0,
-                            vehicleBreakdown: {},
-                            status: 'Pending',
-                            originCoords: oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null,
-                            destCoords: dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null,
-                            parentPlace: item
-                        });
+                    const oZoneClean = rvCleanZoneId(oRes.zone);
+                    const dZoneClean = rvCleanZoneId(dRes.zone);
+
+                    if (oZoneClean !== 'Unknown' && oZoneClean === dZoneClean) {
+                        const key = `${oZoneClean}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
+                        if (!tripMap.has(key)) {
+                            let pCoords = null;
+                            if (plazaName) {
+                                const keys = Object.keys(rv_plazaMapping);
+                                const match = keys.find(k => k.toLowerCase() === plazaName.toLowerCase());
+                                if (match) pCoords = rv_plazaMapping[match];
+                            }
+
+                            tripMap.set(key, {
+                                zone: oZoneClean,
+                                origin: oName,
+                                originalOrigin: oName,
+                                destination: dName,
+                                originalDestination: dName,
+                                plaza: plazaName,
+                                tripCount: 0,
+                                vehicleBreakdown: {},
+                                status: 'Pending',
+                                originCoords: oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null,
+                                destCoords: dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null,
+                                plazaCoords: pCoords,
+                                parentPlace: item
+                            });
+                        }
+                        const trip = tripMap.get(key);
+                        trip.tripCount += count;
+                        trip.vehicleBreakdown[vehicleClass] = (trip.vehicleBreakdown[vehicleClass] || 0) + count;
                     }
-                    const trip = tripMap.get(key);
-                    trip.tripCount += count;
-                    trip.vehicleBreakdown[vehicleClass] = (trip.vehicleBreakdown[vehicleClass] || 0) + count;
                 }
             }
         }
@@ -594,7 +638,7 @@ function rvRenderIntrazonalTable() {
                     </div>
                 </td>
                 <td class="rv-cell-status">
-                    <span class="rv-status-badge ${statusClass}">${trip.status}</span>
+                    <span class="rv-status-badge ${statusClass}">${trip.status === 'Removed from data' ? 'Deleted' : trip.status}</span>
                 </td>
             </tr>
             <tr class="rv-details-row" id="rv-details-${idx}" style="display: none;">
@@ -666,47 +710,66 @@ async function rvMapView(idx) {
     // 2. Use stored resolved coordinates
     const originCoords = trip.originCoords;
     const destCoords = trip.destCoords;
+    const plazaCoords = trip.plazaCoords;
 
     if (originCoords) {
-        const marker = new google.maps.Marker({
+        const mO = new google.maps.Marker({
             position: originCoords,
             map: rv_map,
             label: { text: 'O', color: '#fff', fontSize: '11px', fontWeight: '700' },
             icon: {
                 path: google.maps.SymbolPath.CIRCLE,
                 scale: 12,
-                fillColor: '#3b82f6',
+                fillColor: '#1ade48ff',
                 fillOpacity: 1,
                 strokeColor: '#fff',
                 strokeWeight: 2
             },
             title: `Origin`
         });
-        marker.addListener('click', () => {
+        mO.addListener('click', () => {
             if (rv_isEditMode) rvStartRelocate('O');
         });
-        rv_markers.push(marker);
+        rv_markers.push(mO);
     }
 
     if (destCoords) {
-        const marker = new google.maps.Marker({
+        const mD = new google.maps.Marker({
             position: destCoords,
             map: rv_map,
             label: { text: 'D', color: '#fff', fontSize: '11px', fontWeight: '700' },
             icon: {
                 path: google.maps.SymbolPath.CIRCLE,
                 scale: 12,
-                fillColor: '#ef4444',
+                fillColor: '#d33e3eff',
                 fillOpacity: 1,
                 strokeColor: '#fff',
                 strokeWeight: 2
             },
             title: `Destination`
         });
-        marker.addListener('click', () => {
+        mD.addListener('click', () => {
             if (rv_isEditMode) rvStartRelocate('D');
         });
-        rv_markers.push(marker);
+        rv_markers.push(mD);
+    }
+
+    if (plazaCoords) {
+        const mP = new google.maps.Marker({
+            position: plazaCoords,
+            map: rv_map,
+            label: { text: 'P', color: '#ffffffff', fontSize: '11px', fontWeight: '700' },
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 10,
+                fillColor: '#0b78f5ff',
+                fillOpacity: 1,
+                strokeColor: '#740000ff',
+                strokeWeight: 2
+            },
+            title: trip.plaza ? 'Plaza: ' + trip.plaza : 'Survey Location'
+        });
+        rv_markers.push(mP);
     }
 
     // 3. Draw driving route between origin and destination
@@ -717,7 +780,7 @@ async function rvMapView(idx) {
                 map: rv_map,
                 suppressMarkers: true,
                 polylineOptions: {
-                    strokeColor: '#4ade80',
+                    strokeColor: '#348bddff',
                     strokeWeight: 4,
                     strokeOpacity: 0.8
                 }
@@ -753,6 +816,7 @@ async function rvMapView(idx) {
         const bounds = new google.maps.LatLngBounds();
         bounds.extend(originCoords);
         bounds.extend(destCoords);
+        if (plazaCoords) bounds.extend(plazaCoords);
         rv_map.fitBounds(bounds, 60);
     } else if (originCoords) {
         rv_map.setCenter(originCoords);
@@ -788,6 +852,172 @@ function rvStartRelocate(point) {
         rv_autocompleteInstance = new google.maps.places.Autocomplete(input);
         rv_autocompleteInstance.addListener('place_changed', rvHandlePlaceSelection);
     }
+
+    // Immediately fetch and plot suggestions for the clicked point
+    rvFetchAndPlotSuggestions(point);
+}
+
+async function rvFetchAndPlotSuggestions(point) {
+    if (rv_editingTripIdx === -1) return;
+    const tripData = rv_currentSubTab === 'intrazonal' ? rv_intrazonalData : rv_illogicalData;
+    const trip = tripData[rv_editingTripIdx];
+    const name = point === 'O' ? trip.origin : trip.destination;
+    
+    let zone = '';
+    if (rv_currentSubTab === 'intrazonal') {
+        zone = trip.zone;
+    } else {
+        zone = point === 'O' ? trip.originZone : trip.destZone;
+    }
+
+    // Clear old suggestions
+    rv_suggestionMarkers.forEach(m => m.setMap(null));
+    rv_suggestionMarkers = [];
+
+    try {
+        const resp = await fetch(`/api/suggestions?name=${encodeURIComponent(name)}&zone_restriction=${encodeURIComponent(zone)}`);
+        const data = await resp.json();
+
+        if (data.suggestions && data.suggestions.length > 0) {
+            let minDistance = Infinity;
+            let nearestSuggestion = null;
+
+            if (trip.plazaCoords) {
+                data.suggestions.forEach(s => {
+                    const dist = calculateHaversine(trip.plazaCoords.lat, trip.plazaCoords.lng, s.lat, s.lng);
+                    s._distance = dist;
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        nearestSuggestion = s;
+                    }
+                });
+            }
+
+            const bounds = new google.maps.LatLngBounds();
+            if (trip.originCoords) bounds.extend(trip.originCoords);
+            if (trip.destCoords) bounds.extend(trip.destCoords);
+            if (trip.plazaCoords) bounds.extend(trip.plazaCoords);
+
+            data.suggestions.forEach(s => {
+                const isOutside = s.zone !== zone;
+                const markerColor = isOutside ? '#f4a108ff' : '#12c7d7ff'; // Orange if outside, Green if inside
+
+                const m = new google.maps.Marker({
+                    position: { lat: s.lat, lng: s.lng },
+                    map: rv_map,
+                    title: s.name,
+                    label: { text: s.name, color: '#aa3c1aff', fontSize: '11px', fontWeight: 'bold', className: 'rv-suggestion-label' },
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 9,
+                        fillColor: markerColor,
+                        fillOpacity: 1,
+                        strokeColor: '#d30e0eff',
+                        strokeWeight: 2
+                    }
+                });
+
+                let distanceHtml = '';
+                if (trip.plazaCoords) {
+                    const distKm = calculateHaversine(trip.plazaCoords.lat, trip.plazaCoords.lng, s.lat, s.lng).toFixed(2);
+                    distanceHtml = `<p style="margin:0 0 10px 0;font-size:11px;color:#64748b;">Distance to survey location: <span style="font-weight:600;color:#000;">${distKm} km</span></p>`;
+                }
+
+                const plazaSet = new Set();
+                if (trip.rawRows) {
+                    trip.rawRows.forEach(r => {
+                        const p = (r.SURVEY_LOCATION || r.PLAZA_NAME || r.PLAZA || '').trim();
+                        if (p) plazaSet.add(p);
+                    });
+                }
+                if (trip.plaza) plazaSet.add(trip.plaza);
+                const plazas = Array.from(plazaSet);
+
+                let plazaCheckboxHtml = '';
+                if (plazas.length > 0) {
+                    plazaCheckboxHtml = `
+                        <div style="margin-bottom:10px;">
+                            <label style="font-size:11px;font-weight:600;display:flex;align-items:center;gap:4px;margin-bottom:4px;">
+                                <input type="checkbox" id="rv-resolve-all-check" checked> Apply to ALL Survey Locations
+                            </label>
+                            <div id="rv-plaza-selection-list" style="display:none; margin-left:20px; max-height:80px; overflow-y:auto; border:1px solid #eee; border-radius:4px; padding:4px;">
+                                ${plazas.map(p => `
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:3px; padding:2px;">
+                                        <input type="checkbox" class="rv-plaza-resolve-item" value="${p}" checked> ${p}
+                                    </label>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                m.addListener('click', () => {
+                    const content = document.createElement('div');
+                    content.className = 'suggestion-popup';
+                    content.style.cssText = 'padding:10px;min-width:200px;font-family:Inter,sans-serif;';
+
+                    const title = `<h4 style="margin:0 0 5px 0;font-size:14px;color:#1e293b;">${s.name}</h4>`;
+                    const details = `<p style="margin:0 0 5px 0;font-size:12px;color:#64748b;">Zone: <span style="font-weight:600;color:${isOutside ? '#ea580c' : '#16a34a'};">${s.zone || 'Unknown'}</span></p>`;
+
+                    content.innerHTML = title + details + distanceHtml + plazaCheckboxHtml;
+
+                    const resolveBtn = document.createElement('button');
+                    resolveBtn.textContent = 'Confirm & Resolve';
+                    resolveBtn.style.cssText = 'background:#16a34a;color:white;border:none;padding:8px 10px;border-radius:4px;cursor:pointer;width:100%;font-size:12px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);';
+
+                    resolveBtn.addEventListener('click', () => {
+                        const allCheck = content.querySelector('#rv-resolve-all-check');
+                        if (allCheck && !allCheck.checked) {
+                            const checkedPlazas = Array.from(content.querySelectorAll('.rv-plaza-resolve-item:checked')).map(i => i.value);
+                            if (checkedPlazas.length === 0) {
+                                alert("Please select at least one survey location.");
+                                return;
+                            }
+                            trip.resolvedPlazas = checkedPlazas; // Just store it in the trip for backend export logic potentially later
+                        } else {
+                            trip.resolvedPlazas = null;
+                        }
+
+                        if (rv_activeInfoWindow) rv_activeInfoWindow.close();
+                        rvApplyResolution(s.lat, s.lng, s.name, point);
+                    });
+
+                    content.appendChild(resolveBtn);
+
+                    const allCheckEl = content.querySelector('#rv-resolve-all-check');
+                    if (allCheckEl) {
+                        const listEl = content.querySelector('#rv-plaza-selection-list');
+                        allCheckEl.addEventListener('change', () => {
+                            listEl.style.display = allCheckEl.checked ? 'none' : 'block';
+                        });
+                    }
+
+                    const iw = new google.maps.InfoWindow({ content });
+                    iw.open(rv_map, m);
+                    rv_activeInfoWindow = iw;
+                });
+
+                rv_suggestionMarkers.push(m);
+                bounds.extend({ lat: s.lat, lng: s.lng });
+
+                if (trip.plazaCoords) {
+                    const isNearest = (s === nearestSuggestion);
+                    const line = new google.maps.Polyline({
+                        path: [trip.plazaCoords, { lat: s.lat, lng: s.lng }],
+                        strokeColor: isNearest ? 'red' : 'blue',
+                        strokeOpacity: isNearest ? 0.8 : 0.4,
+                        strokeWeight: isNearest ? 3 : 1,
+                        map: rv_map
+                    });
+                    rv_suggestionMarkers.push(line);
+                }
+            });
+            
+            rv_map.fitBounds(bounds, 60);
+        }
+    } catch (e) {
+        console.warn('Failed to fetch suggestions in R&V:', e);
+    }
 }
 
 function rvCloseSearch(silent = false) {
@@ -801,6 +1031,15 @@ function rvCloseSearch(silent = false) {
         input.value = '';
         input.disabled = true;
     }
+
+    // Clear suggestions
+    rv_suggestionMarkers.forEach(m => m.setMap(null));
+    rv_suggestionMarkers = [];
+    if (rv_activeInfoWindow) {
+        rv_activeInfoWindow.close();
+        rv_activeInfoWindow = null;
+    }
+
     rv_editingPoint = null;
 }
 
@@ -816,34 +1055,61 @@ async function rvHandlePlaceSelection() {
     const newLat = place.geometry.location.lat();
     const newLng = place.geometry.location.lng();
     const newName = place.name;
-    const trip = rv_intrazonalData[rv_editingTripIdx];
+
+    rvApplyResolution(newLat, newLng, newName, rv_editingPoint);
+}
+
+async function rvApplyResolution(newLat, newLng, newName, point) {
+    const tripData = rv_currentSubTab === 'intrazonal' ? rv_intrazonalData : rv_illogicalData;
+    const trip = tripData[rv_editingTripIdx];
 
     try {
-        // Fetch new zone
         const resp = await fetch(`/api/zone?lat=${newLat}&lng=${newLng}`);
         const data = await resp.json();
         const newZone = rvCleanZoneId(data.zone);
 
-        if (rv_editingPoint === 'O') {
-            trip.originCoords = { lat: newLat, lng: newLng };
-            trip.origin = newName;
-            trip.zone = newZone; // Update zone
-        } else {
-            trip.destCoords = { lat: newLat, lng: newLng };
-            trip.destination = newName;
-            trip.zone = newZone; // Update zone
-        }
+        const targetOriginalName = point === 'O' ? trip.originalOrigin : trip.originalDestination;
 
-        // Update status if inter-zonal
-        if (newZone !== 'Unknown' && rvCleanZoneId(trip.zone) !== 'Unknown') {
-            trip.status = 'Edited';
-            alert('Location updated successfully.');
-        }
+        // Apply resolution to all matching trips in both tabs
+        [rv_intrazonalData, rv_illogicalData].forEach(dataset => {
+            dataset.forEach(t => {
+                let resolved = false;
+                if (t.originalOrigin === targetOriginalName) {
+                    t.origin = newName;
+                    t.originCoords = { lat: newLat, lng: newLng };
+                    if (t.zone !== undefined) t.zone = newZone;
+                    if (t.originZone !== undefined) t.originZone = newZone;
+                    resolved = true;
+                }
+                if (t.originalDestination === targetOriginalName) {
+                    t.destination = newName;
+                    t.destCoords = { lat: newLat, lng: newLng };
+                    if (t.zone !== undefined) t.zone = newZone;
+                    if (t.destZone !== undefined) t.destZone = newZone;
+                    resolved = true;
+                }
+
+                if (resolved) {
+                    t.status = 'Resolved';
+                    // Recompute distances for illogical trips if possible
+                    if (t.originCoords && t.destCoords && t.plazaCoords) {
+                        t.distOD = calculateHaversine(t.originCoords.lat, t.originCoords.lng, t.destCoords.lat, t.destCoords.lng);
+                        t.distOPD = calculateHaversine(t.originCoords.lat, t.originCoords.lng, t.plazaCoords.lat, t.plazaCoords.lng) + calculateHaversine(t.plazaCoords.lat, t.plazaCoords.lng, t.destCoords.lat, t.destCoords.lng);
+                    }
+                }
+            });
+        });
 
         rvCloseSearch();
         rvSave(); // autosave
-        rvRenderIntrazonalTable(); // Refresh table view
-        rvMapView(rv_editingTripIdx); // redraw map
+
+        if (rv_currentSubTab === 'intrazonal') {
+            rvRenderIntrazonalTable();
+            rvMapView(rv_editingTripIdx);
+        } else {
+            rvRenderIllogicalTable();
+            rvMapViewIllogical(rv_editingTripIdx);
+        }
 
     } catch (err) {
         console.error("Error updating location:", err);
@@ -939,6 +1205,7 @@ function rvShowDetails(idx) {
  * Remove trip — marks as "Removed from data".
  */
 function rvRemoveTrip(idx) {
+    if (!confirm('Are you sure you want to remove these trips from the dataset? This will exclude them from the export.')) return;
     const trip = rv_intrazonalData[idx];
     if (!trip || trip.status === 'Removed from data') return;
 
@@ -975,6 +1242,14 @@ function rvClearMap() {
     // Clear markers
     rv_markers.forEach(m => m.setMap(null));
     rv_markers = [];
+
+    // Clear suggestions
+    rv_suggestionMarkers.forEach(m => m.setMap(null));
+    rv_suggestionMarkers = [];
+    if (rv_activeInfoWindow) {
+        rv_activeInfoWindow.close();
+        rv_activeInfoWindow = null;
+    }
 
     // Clear polylines / directions renderers
     rv_polylines.forEach(p => {
@@ -1257,4 +1532,461 @@ async function rvCheckStatus() {
     } catch {
         dot.className = 'status-dot offline';
     }
+}
+
+// ── Illogical Trips ──────────────────────────────────────────────────────────
+
+function rvDetectIllogicalTripsFromRaw(rawRows, resolutions) {
+    rv_illogicalData = [];
+    const tripMap = new Map();
+    const resolutionsUpper = {};
+
+    for (const [k, v] of Object.entries(resolutions || {})) {
+        resolutionsUpper[k.toUpperCase()] = v;
+    }
+
+    if (!rawRows || !Array.isArray(rawRows)) return;
+
+    for (const row of rawRows) {
+        const oZone = rvCleanZoneId(row.ORIGIN_ZONE);
+        const dZone = rvCleanZoneId(row.DESTINATION_ZONE);
+
+        if (oZone === '0' || oZone === '' || oZone === 'Unknown' || oZone === dZone) continue;
+
+        const oName = (row.ORIGIN || '').trim();
+        const dName = (row.DESTINATION || '').trim();
+        const vClass = (row.MAV_SPLIT || row.VEHICLE_CODE || 'Unknown').trim();
+        const pName = (row.SURVEY_LOCATION || row.PLAZA_NAME || row.PLAZA || '').trim();
+
+        const count = 1;
+        const sortedNames = [oName.toUpperCase(), dName.toUpperCase()].sort();
+        const key = `${sortedNames[0]}|${sortedNames[1]}|${pName.toUpperCase()}`;
+
+        if (!tripMap.has(key)) {
+            const oRes = rvGetResolvedData(oName, resolutionsUpper);
+            const dRes = rvGetResolvedData(dName, resolutionsUpper);
+
+            const oCoords = oRes ? (oRes.coords || { lat: oRes.lat, lng: oRes.lng }) : null;
+            const dCoords = dRes ? (dRes.coords || { lat: dRes.lat, lng: dRes.lng }) : null;
+
+            let pCoords = null;
+            if (pName) {
+                const keys = Object.keys(rv_plazaMapping);
+                const match = keys.find(k => k.toLowerCase() === pName.toLowerCase());
+                if (match) pCoords = rv_plazaMapping[match];
+            }
+
+            if (!oCoords || !dCoords || !pCoords || !oCoords.lat || !dCoords.lat || !pCoords.lat) continue;
+
+            const distOD = calculateHaversine(oCoords.lat, oCoords.lng, dCoords.lat, dCoords.lng);
+            const distOP = calculateHaversine(oCoords.lat, oCoords.lng, pCoords.lat, pCoords.lng);
+            const distPD = calculateHaversine(pCoords.lat, pCoords.lng, dCoords.lat, dCoords.lng);
+
+            let isIllogical = false;
+            let reason = '';
+
+            // Logic 1: Significant distance diff (> 20% more route length)
+            if (distOD > 0 && (distOP + distPD) > distOD * 1.2) {
+                isIllogical = true;
+                reason = 'Significant distance difference';
+            }
+
+            // Logic 2: U-Turn near plaza (Angle O-P-D < ~36 degrees => cos > 0.8)
+            if (!isIllogical && distOP > 0 && distPD > 0) {
+                const cosTheta = (distOP * distOP + distPD * distPD - distOD * distOD) / (2 * distOP * distPD);
+                if (cosTheta > 0.8) {
+                    isIllogical = true;
+                    reason = 'U-turn at Plaza';
+                }
+            }
+
+            if (isIllogical) {
+                tripMap.set(key, {
+                    originZone: oZone,
+                    destZone: dZone,
+                    origin: oName,
+                    originalOrigin: oName,
+                    destination: dName,
+                    originalDestination: dName,
+                    plaza: pName,
+                    tripCount: 0,
+                    vehicleBreakdown: {},
+                    status: 'Pending',
+                    reason: reason,
+                    distOD: distOD,
+                    distOPD: distOP + distPD,
+                    originCoords: oCoords,
+                    destCoords: dCoords,
+                    plazaCoords: pCoords,
+                    rawRows: []
+                });
+            }
+        }
+
+        const trip = tripMap.get(key);
+        if (trip) {
+            trip.tripCount += count;
+            trip.vehicleBreakdown[vClass] = (trip.vehicleBreakdown[vClass] || 0) + count;
+            trip.rawRows.push(row);
+        }
+    }
+
+    rv_illogicalData = Array.from(tripMap.values());
+    rv_illogicalData.sort((a, b) => b.tripCount - a.tripCount);
+    rvRenderIllogicalTable();
+}
+
+function rvDetectIllogicalTrips(apiData, resolutions) {
+    rv_illogicalData = [];
+    const tripMap = new Map();
+    const resolutionsUpper = {};
+
+    for (const [k, v] of Object.entries(resolutions || {})) {
+        resolutionsUpper[k.toUpperCase()] = v;
+    }
+
+    if (!apiData || !Array.isArray(apiData)) return;
+
+    for (const item of apiData) {
+        if (!item.analytics || !item.analytics.vehicleInteractionsPlaza) continue;
+
+        for (const [plazaName, vehicleInteractions] of Object.entries(item.analytics.vehicleInteractionsPlaza)) {
+            for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
+                if (!Array.isArray(interactions)) continue;
+
+                for (const interStr of interactions) {
+                    const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
+                    if (!match) continue;
+
+                    const oName = match[1].trim();
+                    const dName = match[2].trim();
+                    const count = parseInt(match[3], 10);
+
+                    const oRes = rvGetResolvedData(oName, resolutionsUpper);
+                    const dRes = rvGetResolvedData(dName, resolutionsUpper);
+
+                    const oZoneClean = oRes ? rvCleanZoneId(oRes.zone) : 'Unknown';
+                    const dZoneClean = dRes ? rvCleanZoneId(dRes.zone) : 'Unknown';
+
+                    if (oZoneClean === 'Unknown' || dZoneClean === 'Unknown' || oZoneClean === dZoneClean) continue;
+
+                    const sortedNames = [oName.toUpperCase(), dName.toUpperCase()].sort();
+                    const key = `${sortedNames[0]}|${sortedNames[1]}|${plazaName.toUpperCase()}`;
+
+                    if (!tripMap.has(key)) {
+                        const oCoords = oRes.coords || { lat: oRes.lat, lng: oRes.lng };
+                        const dCoords = dRes.coords || { lat: dRes.lat, lng: dRes.lng };
+
+                        let pCoords = null;
+                        const keys = Object.keys(rv_plazaMapping);
+                        const matchPlaza = keys.find(k => k.toLowerCase() === plazaName.toLowerCase());
+                        if (matchPlaza) pCoords = rv_plazaMapping[matchPlaza];
+
+                        if (!oCoords || !dCoords || !pCoords || !oCoords.lat || !dCoords.lat || !pCoords.lat) continue;
+
+                        const distOD = calculateHaversine(oCoords.lat, oCoords.lng, dCoords.lat, dCoords.lng);
+                        const distOP = calculateHaversine(oCoords.lat, oCoords.lng, pCoords.lat, pCoords.lng);
+                        const distPD = calculateHaversine(pCoords.lat, pCoords.lng, dCoords.lat, dCoords.lng);
+
+                        let isIllogical = false;
+                        let reason = '';
+
+                        if (distOD > 0 && (distOP + distPD) > distOD * 1.2) {
+                            isIllogical = true;
+                            reason = 'Significant distance difference';
+                        }
+
+                        if (!isIllogical && distOP > 0 && distPD > 0) {
+                            const cosTheta = (distOP * distOP + distPD * distPD - distOD * distOD) / (2 * distOP * distPD);
+                            if (cosTheta > 0.8) {
+                                isIllogical = true;
+                                reason = 'U-turn at Plaza';
+                            }
+                        }
+
+                        if (isIllogical) {
+                            tripMap.set(key, {
+                                originZone: oZoneClean,
+                                destZone: dZoneClean,
+                                origin: oName,
+                                originalOrigin: oName,
+                                destination: dName,
+                                originalDestination: dName,
+                                plaza: plazaName,
+                                tripCount: 0,
+                                vehicleBreakdown: {},
+                                status: 'Pending',
+                                reason: reason,
+                                distOD: distOD,
+                                distOPD: distOP + distPD,
+                                originCoords: oCoords,
+                                destCoords: dCoords,
+                                plazaCoords: pCoords,
+                                rawRows: []
+                            });
+                        }
+                    }
+
+                    const trip = tripMap.get(key);
+                    if (trip) {
+                        trip.tripCount += count;
+                        trip.vehicleBreakdown[vehicleClass] = (trip.vehicleBreakdown[vehicleClass] || 0) + count;
+                    }
+                }
+            }
+        }
+    }
+
+    rv_illogicalData = Array.from(tripMap.values());
+    rv_illogicalData.sort((a, b) => b.tripCount - a.tripCount);
+    rvRenderIllogicalTable();
+}
+
+function rvRenderIllogicalTable() {
+    const tbody = document.getElementById('rv-illogical-body');
+    if (!tbody) return;
+
+    if (rv_illogicalData.length === 0) {
+        tbody.innerHTML = `
+            <tr class="rv-empty-state">
+                <td colspan="6">
+                    <div class="rv-empty-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="1.5">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        <p style="color: var(--success);">No illogical trips detected. Routes seem optimal.</p>
+                    </div>
+                </td>
+            </tr>`;
+        return;
+    }
+
+    let html = '';
+    rv_illogicalData.forEach((trip, idx) => {
+        const statusClass = trip.status === 'Pending' ? 'rv-status-pending'
+            : trip.status === 'Removed from data' ? 'rv-status-removed'
+                : 'rv-status-resolved';
+
+        html += `
+            <tr class="rv-data-row ${trip.status === 'Removed from data' ? 'rv-row-removed' : ''}" id="rv-ill-row-${idx}">
+                <td class="rv-cell-sno">${idx + 1}</td>
+                <td class="rv-cell-origin" title="${trip.origin}">${rvTruncate(trip.origin, 30)}</td>
+                <td class="rv-cell-dest" title="${trip.destination}">${rvTruncate(trip.destination, 30)}</td>
+                <td class="rv-cell-count">${trip.tripCount}</td>
+                <td class="rv-cell-actions">
+                    <div class="rv-action-group">
+                        <button class="rv-action-btn rv-btn-mapview" onclick="rvMapViewIllogical(${idx})" title="Map View">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"></path><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+                            Map
+                        </button>
+                        <button class="rv-action-btn rv-btn-details" onclick="rvShowDetailsIllogical(${idx})" title="Details">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            Details
+                        </button>
+                        <button class="rv-action-btn rv-btn-remove" onclick="rvRemoveTripIllogical(${idx})" title="Remove" ${trip.status === 'Removed from data' ? 'disabled' : ''}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            Remove
+                        </button>
+                    </div>
+                </td>
+                <td class="rv-cell-status">
+                    <span class="rv-status-badge ${statusClass}">${trip.status}</span>
+                </td>
+            </tr>
+            <tr class="rv-details-row" id="rv-ill-details-${idx}" style="display: none;">
+                <td colspan="6">
+                    <div class="rv-details-content" id="rv-ill-details-content-${idx}"></div>
+                </td>
+            </tr>`;
+    });
+
+    tbody.innerHTML = html;
+}
+
+async function rvMapViewIllogical(idx) {
+    const trip = rv_illogicalData[idx];
+    if (!trip) return;
+
+    // Reset Edit State for new map
+    rv_editingTripIdx = idx;
+    rvCloseSearch(true);
+    rv_isEditMode = true;
+    document.getElementById('rv-map').classList.add('editing-map');
+
+    const editBar = document.getElementById('rv-edit-bar');
+    if (editBar) editBar.style.display = 'none';
+
+    document.querySelectorAll('.rv-data-row').forEach(r => r.classList.remove('rv-row-active'));
+    const row = document.getElementById(`rv-ill-row-${idx}`);
+    if (row) row.classList.add('rv-row-active');
+
+    rvClearMap();
+
+    if (!rv_map) {
+        rvInitMap();
+        await new Promise(r => setTimeout(r, 500));
+    }
+    if (!rv_map) return;
+
+    const placeholder = document.getElementById('rv-map-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+
+    const addMarker = (coords, label, title, color, strokeColor = '#fff') => {
+        if (!coords) return null;
+        const marker = new google.maps.Marker({
+            position: coords,
+            map: rv_map,
+            label: { text: label, color: '#fff', fontSize: '11px', fontWeight: '700' },
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: color, fillOpacity: 1, strokeColor: strokeColor, strokeWeight: 2 },
+            title: title
+        });
+        rv_markers.push(marker);
+        return marker;
+    };
+
+    const mO = addMarker(trip.originCoords, 'O', 'Origin', '#1ade48ff');
+    const mD = addMarker(trip.destCoords, 'D', 'Destination', '#d33e3eff');
+    
+    if (trip.plazaCoords) {
+        const mP = new google.maps.Marker({
+            position: trip.plazaCoords,
+            map: rv_map,
+            label: { text: 'P', color: '#ffffffff', fontSize: '11px', fontWeight: '700' },
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 10,
+                fillColor: '#0b78f5ff',
+                fillOpacity: 1,
+                strokeColor: '#740000ff',
+                strokeWeight: 2
+            },
+            title: trip.plaza ? 'Plaza: ' + trip.plaza : 'Survey Location'
+        });
+        rv_markers.push(mP);
+    }
+
+    if (mO) mO.addListener('click', () => { if (rv_isEditMode) rvStartRelocate('O'); });
+    if (mD) mD.addListener('click', () => { if (rv_isEditMode) rvStartRelocate('D'); });
+
+    if (trip.originCoords && trip.destCoords && trip.plazaCoords) {
+        const directionsService = new google.maps.DirectionsService();
+
+        // 1. Red line: O -> P -> D
+        const dirRendererRed = new google.maps.DirectionsRenderer({
+            map: rv_map,
+            suppressMarkers: true,
+            polylineOptions: { strokeColor: 'red', strokeWeight: 4, strokeOpacity: 0.8 }
+        });
+        rv_polylines.push(dirRendererRed);
+
+        directionsService.route({
+            origin: trip.originCoords,
+            destination: trip.destCoords,
+            waypoints: [{ location: trip.plazaCoords, stopover: true }],
+            travelMode: google.maps.TravelMode.DRIVING
+        }, (res, status) => { if (status === 'OK') dirRendererRed.setDirections(res); });
+
+        // 2. Blue dotted line: O -> D
+        directionsService.route({
+            origin: trip.originCoords,
+            destination: trip.destCoords,
+            travelMode: google.maps.TravelMode.DRIVING
+        }, (res, status) => {
+            if (status === 'OK') {
+                const path = res.routes[0].overview_path;
+                const dottedLine = new google.maps.Polyline({
+                    path: path,
+                    strokeOpacity: 0,
+                    icons: [{
+                        icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: 'blue', strokeWeight: 4, scale: 2 },
+                        offset: '0',
+                        repeat: '20px'
+                    }],
+                    map: rv_map
+                });
+                rv_polylines.push(dottedLine);
+            } else {
+                // Fallback basic line
+                const line = new google.maps.Polyline({
+                    path: [trip.originCoords, trip.destCoords],
+                    strokeColor: 'blue', strokeOpacity: 0.5, strokeWeight: 3, map: rv_map
+                });
+                rv_polylines.push(line);
+            }
+        });
+
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend(trip.originCoords);
+        bounds.extend(trip.destCoords);
+        bounds.extend(trip.plazaCoords);
+        rv_map.fitBounds(bounds, 60);
+    } else if (trip.originCoords) {
+        rv_map.setCenter(trip.originCoords);
+        rv_map.setZoom(12);
+    }
+}
+
+function rvShowDetailsIllogical(idx) {
+    const detailsRow = document.getElementById(`rv-ill-details-${idx}`);
+    const contentDiv = document.getElementById(`rv-ill-details-content-${idx}`);
+    const trip = rv_illogicalData[idx];
+
+    if (detailsRow.style.display === 'table-row') {
+        detailsRow.style.display = 'none';
+        rv_expandedRow = -1;
+        return;
+    }
+
+    if (rv_expandedRow !== -1 && rv_expandedRow !== idx) {
+        const oldRow = document.getElementById(`rv-ill-details-${rv_expandedRow}`);
+        if (oldRow) oldRow.style.display = 'none';
+    }
+
+    let breakHtml = '';
+    for (const [vClass, count] of Object.entries(trip.vehicleBreakdown)) {
+        breakHtml += `<span class="rv-detail-chip" style="margin-right: 8px; margin-bottom: 8px; display: inline-block;"><strong>${vClass}</strong>: ${count}</span>`;
+    }
+
+    const distODStr = trip.distOD ? trip.distOD.toFixed(2) : '--';
+    const distOPDStr = trip.distOPD ? trip.distOPD.toFixed(2) : '--';
+
+    contentDiv.innerHTML = `
+        <div class="rv-details-grid">
+            <div class="rv-details-col">
+                <h4 style="color: var(--warning); margin-bottom: 0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    Reason
+                </h4>
+                <p style="font-weight: 500; color: #fff;">${trip.reason}</p>
+                <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.8rem;">Plaza: ${trip.plaza}</p>
+                <div style="margin-top: 1rem; font-size: 0.85rem; color: #94a3b8;">
+                    <div><strong style="color:#cbd5e1;">Origin - Destination:</strong> ${distODStr} km</div>
+                    <div style="margin-top:4px;"><strong style="color:#cbd5e1;">Origin - Survey Location - Destination:</strong> ${distOPDStr} km</div>
+                </div>
+            </div>
+            <div class="rv-details-col">
+                <h4>Vehicle Breakdown</h4>
+                <div class="rv-vclass-list" style="display:flex; flex-wrap:wrap; gap:8px;">${breakHtml}</div>
+            </div>
+            <div class="rv-details-col rv-details-actions">
+                <h4>Resolution</h4>
+                ${trip.status !== 'Pending' ? `
+                    <div style="margin-bottom: 1rem;">
+                        <span class="rv-status-badge ${trip.status === 'Removed from data' ? 'rv-status-removed' : 'rv-status-resolved'}">${trip.status}</span>
+                    </div>
+                ` : '<div style="margin-bottom: 1rem;"><span class="rv-status-badge rv-status-pending">Pending</span></div>'}
+            </div>
+        </div>
+    `;
+
+    detailsRow.style.display = 'table-row';
+    rv_expandedRow = idx;
+}
+
+function rvRemoveTripIllogical(idx) {
+    if (!confirm('Are you sure you want to remove these trips from the dataset? This will exclude them from the export.')) return;
+    const trip = rv_illogicalData[idx];
+    trip.status = 'Removed from data';
+    rvRenderIllogicalTable();
 }

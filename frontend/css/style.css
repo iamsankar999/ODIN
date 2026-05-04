@@ -1066,6 +1066,12 @@ body.light-theme .commodity-toggle {
     background: transparent;
 }
 
+.rv-suggestion-label {
+    text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+    transform: translate(30px, 0);
+    background: transparent;
+}
+
 .distance-label {
     background: rgba(0, 0, 0, 0.7) !important;
     padding: 2px 6px !important;

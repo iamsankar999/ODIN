@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="css/style.css?v=2.4.7">
+    <link rel="stylesheet" href="css/style.css?v=2.5.2">
 </head>
 
 <body>
@@ -47,7 +47,7 @@
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insight Navigator</p>
-                <div id="odin-version-display" class="odin-version-tag">v2.5.1</div>
+                <div id="odin-version-display" class="odin-version-tag">v2.5.2</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()" style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -504,10 +504,10 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
         <!-- Custom JS -->
-        <script src="js/app.js?v=2.4.7"></script>
+        <script src="js/app.js?v=2.5.2"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script src="js/basenumber.js"></script>
-        <script src="js/review_viz.js?v=2.4.7"></script>
+        <script src="js/review_viz.js?v=2.5.2"></script>
 
 
         <!-- User Management Modal -->
@@ -853,15 +853,35 @@
                         </div>
                     </div>
 
-                    <!-- Illogical Pairs tab content (Coming Soon) -->
+                    <!-- Illogical Pairs tab content -->
                     <div id="rv-illogical-content" class="rv-tab-content">
-                        <div class="rv-coming-soon">
-                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <polyline points="12 6 12 12 16 14"></polyline>
-                            </svg>
-                            <h2>Feature Coming Soon</h2>
-                            <p>Illogical Pairs detection will be available in a future update.</p>
+                        <div class="rv-table-wrapper">
+                            <table class="rv-table" id="rv-illogical-table">
+                                <thead>
+                                    <tr>
+                                        <th>S.No</th>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Trip Count</th>
+                                        <th>Review & Action</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rv-illogical-body">
+                                    <tr class="rv-empty-state">
+                                        <td colspan="6">
+                                            <div class="rv-empty-icon">
+                                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="1.5">
+                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                                    <circle cx="12" cy="12" r="3"></circle>
+                                                </svg>
+                                                <p>Load project data to detect illogical trips</p>
+                                                <button class="btn btn-sm btn-primary" onclick="rvLoadData()" style="margin-top: 0.5rem;">Load Data</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </section>
