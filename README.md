@@ -1,23 +1,15 @@
-<<<<<<< HEAD
-# ODIN: Origin-Destination Insights & Navigator
-=======
 # 🛰️ ODIN: Origin-Destination Insights & Navigator
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 
 **ODIN** is a professional-grade geospatial validation and analytical platform designed to automate the complex process of Origin-Destination (OD) data coding. It transforms raw, manually-surveyed place names into validated, geocoded, and zone-mapped datasets.
 
-![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)
+![Version](https://img.shields.io/badge/version-2.5.3-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-green.svg)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet.js-orange.svg)
 
 ---
 
-<<<<<<< HEAD
-## Key Features
-=======
 ## 🚀 Key Features
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 
 *   **Spatial Intelligence Engine**: Automated Point-in-Polygon (PIP) lookups using local Shapefiles for administrative alignment.
 *   **Progressive Resolution**: Batch-resolve survey locations using phonetic matching (Double Metaphone) and fuzzy similarity.
@@ -27,19 +19,11 @@
 
 ---
 
-<<<<<<< HEAD
-## Repository Anatomy
-
-Understanding the file structure is key to navigating the ODIN codebase:
-
-### Frontend (`/frontend`)
-=======
 ## 📂 Repository Anatomy
 
 Understanding the file structure is key to navigating the ODIN codebase:
 
 ### 🖥️ Frontend (`/frontend`)
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 The frontend is a high-performance Single Page Application (SPA) built with Vanilla JS for maximum speed.
 
 *   **[`index.html`](frontend/index.html)**: The primary interface. Contains the multi-mode dashboard, wizard steps, and map containers.
@@ -47,11 +31,7 @@ The frontend is a high-performance Single Page Application (SPA) built with Vani
 *   **[`js/review_viz.js`](frontend/js/review_viz.js)**: Dedicated logic for the R&V module. Handles spatial filtering, illogical trip detection, and dynamic map markers.
 *   **[`css/styles.css`](frontend/css/)**: Custom design system built for professional engineering workflows (dark mode support, glassmorphism).
 
-<<<<<<< HEAD
-### Backend (`/backend`)
-=======
 ### ⚙️ Backend (`/backend`)
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 A FastAPI-powered REST layer handling heavy computational geometry and data processing.
 
 *   **[`app/main.py`](backend/app/main.py)**: The FastAPI entry point. Configures CORS, middleware, and routes.
@@ -63,22 +43,14 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
     *   **`data_parser.py`**: Robust handlers for `.xlsx` and Shapefile ingestion.
 *   **[`requirements.txt`](requirements.txt)**: Lists essential libraries including `GeoPandas`, `Shapely`, and `FastAPI`.
 
-<<<<<<< HEAD
-### Infrastructure & Scripts
-=======
 ### 🛠️ Infrastructure & Scripts
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 *   **[`ODIN_Launch.bat`](ODIN_Launch.bat)**: Automates the startup sequence (installs deps, starts backend, opens browser).
 *   **[`python-embed/`](python-embed/)**: (Optional) A local, zero-install Python environment for portability.
 *   **[`version.json`](version.json)**: Tracks the current system version for synchronization across modules.
 
 ---
 
-<<<<<<< HEAD
-## Tech Stack
-=======
 ## 🛠️ Tech Stack
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 
 | Layer | Technologies |
 | :--- | :--- |
@@ -119,11 +91,7 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
 
 ---
 
-<<<<<<< HEAD
-## Operational Logic
-=======
 ## 📊 Operational Logic
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
 
 ### Data Flow
 1. **Input**: User uploads a Shapefile (Zonal boundaries) and an OD Survey Excel.
@@ -134,8 +102,4 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
 
 ---
 
-<<<<<<< HEAD
 © 2025 ODIN Project Team. Built for transportation excellence.
-=======
-© 2024 ODIN Project Team. Built for transportation excellence.
->>>>>>> c49e112 (v2.5.3: Zone Assign Enhancements - Full-screen Map, Floating Analytics, and Glassmorphism UI)
