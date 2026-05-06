@@ -648,6 +648,14 @@ document.addEventListener('click', (e) => {
         reviewDropdown.classList.remove('show');
     }
 
+    // Pending Dropdown — close on outside click
+    const pendingDropdown = document.getElementById('pending-dropdown');
+    const placeNav = e.target.closest('.place-navigator');
+    if (pendingDropdown && pendingDropdown.classList.contains('show') && !placeNav) {
+        pendingDropdown.classList.add('out');
+        setTimeout(() => pendingDropdown.classList.remove('show', 'out'), 250);
+    }
+
     // Floating Popup
     const floatingPopup = document.getElementById('floating-popup');
     if (floatingPopup && floatingPopup.classList.contains('active')) {
@@ -669,6 +677,7 @@ window.initMap = function () {
         zoom: 5,
         center: defaultCenter,
         mapTypeId: 'roadmap',
+        mapTypeControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT },
         // styles: [
         //     // Simple dark mode theme to match UI
         //     { elementType: "geometry", stylers: [{ color: "#abd19dff" }] },
@@ -686,6 +695,29 @@ window.initMap = function () {
         //     }
         // ]
     });
+
+    // ── Zone Assign: Attach Google Places Autocomplete to manual search bar ──
+    const manualSearchInput = document.getElementById('manual-search-input');
+    if (manualSearchInput && google.maps.places) {
+        const searchAutocomplete = new google.maps.places.Autocomplete(manualSearchInput, {
+            fields: ['name', 'geometry'],
+        });
+        searchAutocomplete.addListener('place_changed', () => {
+            const selectedPlace = searchAutocomplete.getPlace();
+            if (selectedPlace && selectedPlace.geometry) {
+                // Fill input value with name and trigger search
+                manualSearchInput.value = selectedPlace.name || '';
+                manualTextSearch();
+            }
+        });
+        // Allow Enter key to trigger manual search instead of only autocomplete select
+        manualSearchInput.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                manualTextSearch();
+            }
+        });
+    }
 
     // Map Click Listener for Manual Point Selection
     map.addListener('click', async (e) => {
@@ -2514,11 +2546,114 @@ async function selectSuggestion(rowId, suggestion, selectedPlazas = null) {
     triggerAutoSave();
 }
 
-// Manual Map Selection Click Button Helper
+// Manual Map Selection Click Button Helper (kept for backward compat, feature is now always-on)
 function manualMapSelect() {
     if (unmatchedPlaces.length === 0) return;
     alert("Map Interaction Mode Enabled: Click anywhere on the map to drop a pin and resolve this location manually.");
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  ZONE ASSIGN — Pending Places Dropdown
+// ═══════════════════════════════════════════════════════════════════
+
+function togglePendingDropdown() {
+    const dropdown = document.getElementById('pending-dropdown');
+    if (!dropdown) return;
+
+    if (dropdown.classList.contains('show')) {
+        dropdown.classList.add('out');
+        setTimeout(() => dropdown.classList.remove('show', 'out'), 250);
+        return;
+    }
+
+    // Build pending list grouped by name with occurrence counts
+    const pendingMap = {};
+    unmatchedPlaces.forEach((p, idx) => {
+        const name = p.original_name;
+        if (!pendingMap[name]) {
+            pendingMap[name] = { count: placeOccurrencesMap[name] || 0, firstIdx: idx };
+        }
+    });
+
+    const pendingNames = Object.keys(pendingMap);
+
+    dropdown.innerHTML = '';
+
+    // Search box (sticky)
+    const searchDiv = document.createElement('div');
+    searchDiv.className = 'pending-dropdown-search';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Filter pending places...';
+    searchInput.id = 'pending-dropdown-filter';
+    searchDiv.appendChild(searchInput);
+    dropdown.appendChild(searchDiv);
+
+    // Items container
+    const listContainer = document.createElement('div');
+    listContainer.id = 'pending-dropdown-list';
+    listContainer.style.cssText = 'overflow-y:auto; max-height:300px;';
+    dropdown.appendChild(listContainer);
+
+    function renderPendingItems(filter) {
+        listContainer.innerHTML = '';
+        const query = (filter || '').toLowerCase();
+        let shown = 0;
+        pendingNames.forEach(name => {
+            if (query && !name.toLowerCase().includes(query)) return;
+            const info = pendingMap[name];
+            const item = document.createElement('div');
+            item.className = 'pending-dropdown-item' + (info.firstIdx === currentIndex ? ' active' : '');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'pdi-name';
+            nameSpan.textContent = name;
+
+            const countSpan = document.createElement('span');
+            countSpan.className = 'pdi-count';
+            countSpan.textContent = info.count;
+
+            item.appendChild(nameSpan);
+            item.appendChild(countSpan);
+
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Navigate to this place
+                currentIndex = info.firstIdx;
+                updateNavigatorDisplay();
+                renderCurrentPlace();
+                // Close dropdown
+                dropdown.classList.add('out');
+                setTimeout(() => dropdown.classList.remove('show', 'out'), 250);
+            });
+
+            listContainer.appendChild(item);
+            shown++;
+        });
+
+        if (shown === 0) {
+            listContainer.innerHTML = '<div style="padding:12px; text-align:center; color:var(--text-secondary); font-size:0.75rem;">No matching places</div>';
+        }
+    }
+
+    renderPendingItems('');
+
+    // Filter listener
+    searchInput.addEventListener('input', () => {
+        renderPendingItems(searchInput.value);
+    });
+
+    dropdown.style.transformOrigin = 'top center';
+    dropdown.classList.remove('out');
+    dropdown.classList.add('show');
+
+    // Auto-focus search
+    requestAnimationFrame(() => searchInput.focus());
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ZONE ASSIGN — Review Dropdown (Compact + Glassmorphism)
+// ═══════════════════════════════════════════════════════════════════
 
 function toggleReviewDropdown() {
     const dropdown = document.getElementById('review-dropdown');
@@ -2528,7 +2663,7 @@ function toggleReviewDropdown() {
         const resolvedKeys = Object.keys(resolvedPlaces).reverse();
 
         if (resolvedKeys.length === 0) {
-            dropdown.innerHTML = `<div style="padding: 1rem; color: var(--text-secondary); text-align: center; font-size: 0.85rem;">No places validated yet.</div>`;
+            dropdown.innerHTML = `<div style="padding: 0.75rem; color: var(--text-secondary); text-align: center; font-size: 0.78rem;">No places validated yet.</div>`;
         } else {
             resolvedKeys.forEach(origName => {
                 const mapping = resolvedPlaces[origName];
@@ -2538,18 +2673,14 @@ function toggleReviewDropdown() {
                 item.style.alignItems = 'flex-start';
 
                 const nameHeader = document.createElement('div');
-                nameHeader.style.display = 'flex';
-                nameHeader.style.justifyContent = 'space-between';
-                nameHeader.style.width = '100%';
-                nameHeader.style.marginBottom = '4px';
+                nameHeader.style.cssText = 'display:flex; justify-content:space-between; width:100%; margin-bottom:1px; align-items:center;';
 
                 const nameSpan = document.createElement('span');
-                nameSpan.innerHTML = `<b style="font-size: 0.75rem;">${origName}</b>`;
+                nameSpan.innerHTML = `<b style="font-size: 0.7rem;">${origName}</b>`;
 
                 const editBtn = document.createElement('button');
                 editBtn.className = 'btn btn-sm btn-outline';
-                editBtn.style.padding = '0.15rem 0.4rem';
-                editBtn.style.fontSize = '0.65rem';
+                editBtn.style.cssText = 'padding:1px 6px; font-size:0.6rem; height:18px; line-height:1;';
                 editBtn.textContent = 'Edit';
                 editBtn.onclick = (e) => { e.stopPropagation(); editResolvedPlace(origName); };
 
@@ -2557,12 +2688,11 @@ function toggleReviewDropdown() {
                 nameHeader.appendChild(editBtn);
                 item.appendChild(nameHeader);
 
-                // List resolved plazas
+                // List resolved plazas (compact)
                 const details = document.createElement('div');
-                details.style.fontSize = '10px';
-                details.style.color = '#777';
+                details.style.cssText = 'font-size:9px; color:#777; line-height:1.2;';
                 if (mapping["__all__"]) {
-                    details.innerHTML = `&rarr; ${mapping["__all__"].name} <span style="font-size:9px;">(All Plazas)</span>`;
+                    details.innerHTML = `&rarr; ${mapping["__all__"].name} <span style="font-size:8px;">(All Plazas)</span>`;
                 } else {
                     const plazaNames = Object.keys(mapping).filter(k => k !== "rawPlaceInfo");
                     details.innerHTML = `&rarr; ${plazaNames.length} custom mappings`;

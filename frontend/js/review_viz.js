@@ -79,8 +79,13 @@ function enterReviewVisualization() {
     rvStartStatusPolling();
     rvSyncThemeToggle();
 
-    // If project data already loaded from setup wizard, auto-detect intrazonal trips
-    if (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0 && !rv_dataLoaded) {
+    // If there's an active project session (from Zone/Place Assign), always
+    // re-process to pick up the latest zone assignment changes seamlessly.
+    const hasInSessionData =
+        (typeof resolvedPlaces !== 'undefined' && Object.keys(resolvedPlaces).length > 0) ||
+        (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0);
+
+    if (hasInSessionData) {
         rvProcessLoadedData();
     }
 }
@@ -180,7 +185,11 @@ async function rvLoadData() {
     if (btn) btn.innerHTML = '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;display:inline-block;margin-right:6px;"></span> Processing...';
 
     // If we already have processed OD data from the main app, reprocess it
-    if (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0) {
+    const hasInSessionData =
+        (typeof resolvedPlaces !== 'undefined' && Object.keys(resolvedPlaces).length > 0) ||
+        (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0);
+
+    if (hasInSessionData) {
         rvProcessLoadedData();
         if (btn) btn.innerHTML = origText;
         return;
@@ -319,22 +328,49 @@ async function rvParseProjectZip(file) {
 
 /**
  * Process data that's already loaded in the main app.
+ *
+ * KEY FIX: In Zone Assign mode, resolved places are spliced out of
+ * allUnmatchedPlaces. But those resolved places are the ones WITH zone data,
+ * which is exactly what intrazonal / illogical detection needs. We rebuild
+ * the full places list by pulling back the resolved places from their stored
+ * rawPlaceInfo inside resolvedPlaces.
+ *
+ * Also syncs rv_plazaMapping and rv_resolutions from global state so that
+ * illogical detection has access to plaza coordinates.
  */
 function rvProcessLoadedData() {
-    // Build resolutions from the global resolvedPlaces
+    // Sync R&V state from the global app state
     const resolutions = (typeof resolvedPlaces !== 'undefined') ? resolvedPlaces : {};
+    rv_resolutions = JSON.parse(JSON.stringify(resolutions));
 
-    // allUnmatchedPlaces contains all place data
-    // We need to extract OD pairs with zone info from resolutions
-    const data = (typeof allUnmatchedPlaces !== 'undefined') ? allUnmatchedPlaces : [];
+    if (typeof plazaMapping !== 'undefined' && Object.keys(plazaMapping).length > 0) {
+        rv_plazaMapping = JSON.parse(JSON.stringify(plazaMapping));
+    }
 
-    if (data.length === 0) {
+    // ── Rebuild the FULL places list ──────────────────────────────────────
+    // Start with whatever remains in allUnmatchedPlaces (unresolved places)
+    const allPlaces = [...(typeof allUnmatchedPlaces !== 'undefined' ? allUnmatchedPlaces : [])];
+    const seenIds = new Set(allPlaces.map(p => p.id));
+
+    // Add back every resolved place via its stored rawPlaceInfo reference
+    for (const [, mapping] of Object.entries(resolutions)) {
+        const entries = Object.values(mapping);
+        for (const entry of entries) {
+            if (entry && entry.rawPlaceInfo && entry.rawPlaceInfo.id != null && !seenIds.has(entry.rawPlaceInfo.id)) {
+                allPlaces.push(entry.rawPlaceInfo);
+                seenIds.add(entry.rawPlaceInfo.id);
+                break; // one copy per original place name
+            }
+        }
+    }
+
+    if (allPlaces.length === 0) {
         alert('No OD data loaded. Please load data first.');
         return;
     }
 
-    rvDetectIntrazonalTripsFromPlaces(data, resolutions);
-    rvDetectIllogicalTrips(data, resolutions);
+    rvDetectIntrazonalTripsFromPlaces(allPlaces, resolutions);
+    rvDetectIllogicalTrips(allPlaces, resolutions);
     rv_dataLoaded = true;
 }
 
