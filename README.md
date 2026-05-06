@@ -66,7 +66,11 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
 
 ### Prerequisites
 - Python 3.10 or higher
-- Google Maps API Key (configured in `endpoints.py`)
+- **Google Maps API Key**: Requires a GCP project with the following services enabled:
+    - **Maps JavaScript API**: For frontend map rendering and interactive selection.
+    - **Geocoding API**: For converting place names to coordinates and vice-versa.
+    - **Places API**: For location search, autocomplete, and enriched spatial metadata.
+    - **Distance Matrix API**: For calculating accurate road distances between survey points and destinations.
 
 ### Quick Start (Windows)
 1.  Clone the repository.
@@ -92,6 +96,29 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
 ---
 
 ## 📊 Operational Logic
+
+### Data Input Specifications
+
+To ensure seamless operation, your input files should adhere to the following structure:
+
+#### 1. OD Survey Excel (`.xlsx`)
+The system parses multiple sheets from the uploaded Excel:
+- **`Auto_OD_input` (Main Sheet)**:
+    - `ORIGIN`: Starting point name (String).
+    - `DESTINATION`: Ending point name (String).
+    - `PLAZA_NAME`: Survey location / Toll plaza name.
+    - `MAV_SPLIT`: Vehicle classification (e.g., CAR, LCV, MAV).
+    - *Optional*: `DIRECTION`, `COMMODITY_CODE_ABSTRACT`, `COMMODITY_CODE_DETAILED`.
+- **`CA_code_ABSTRACT` / `CA_code_DETAILED`**: Reference sheets for commodity descriptions.
+- **`OD_code`**: (Optional) Use this to provide pre-assigned zone mappings.
+    - Required Columns: A Name column (`NAME`, `PLACE`, or `ORIGIN`) and a Zone column (`ZONE`, `ZONE_NO`).
+- **`Resolved_rawOD`**: (Optional) Used in R&V mode to load previous progress.
+
+#### 2. Zonal Shapefile (`.zip`)
+- **Format**: Must be a `.zip` archive containing at least the `.shp`, `.shx`, `.dbf`, and `.prj` files.
+- **CRS**: Geographic coordinate system (EPSG:4326) is recommended.
+- **Attribute Columns**: The system automatically scans for zone IDs in these columns (case-insensitive):
+    - `ZONENUMBER`, `ZONENUM`, `ZONE_NO`, `ZONE`, `ID`, `NAME`, `FID`, `OBJECTID`.
 
 ### Data Flow
 1. **Input**: User uploads a Shapefile (Zonal boundaries) and an OD Survey Excel.
