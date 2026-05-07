@@ -69,25 +69,30 @@ function rvGetResolvedData(name, resolutions) {
     return data;
 }
 
-// ── Entry Point ──────────────────────────────────────────────────────────────
+function rvExtractInteractionStrings(interactions) {
+    let result = [];
+    if (Array.isArray(interactions)) {
+        result = interactions;
+    } else if (interactions && typeof interactions === 'object') {
+        for (const dirArr of Object.values(interactions)) {
+            if (Array.isArray(dirArr)) {
+                result.push(...dirArr);
+            }
+        }
+    }
+    return result;
+}
 
 /**
- * Called from the Mode Selection card. Enters the R&V view.
+ * Called from the Mode Selection card. Enters the R&V view and shows data source dialog.
  */
 function enterReviewVisualization() {
     switchView('view-review-viz');
     rvStartStatusPolling();
     rvSyncThemeToggle();
 
-    // If there's an active project session (from Zone/Place Assign), always
-    // re-process to pick up the latest zone assignment changes seamlessly.
-    const hasInSessionData =
-        (typeof resolvedPlaces !== 'undefined' && Object.keys(resolvedPlaces).length > 0) ||
-        (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0);
-
-    if (hasInSessionData) {
-        rvProcessLoadedData();
-    }
+    // Show data source selection dialog
+    rvShowDataSourceDialog();
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────────
@@ -172,30 +177,60 @@ function rvToggleSubTab(tab) {
     document.querySelectorAll('.rv-data-row').forEach(r => r.classList.remove('rv-row-active'));
 }
 
-// ── Data Loading ─────────────────────────────────────────────────────────────
+// ── Data Source Selection Dialog ──────────────────────────────────────────────
 
 /**
- * Load Data handler:
- * - If project data is already available from setup wizard, use it.
- * - Otherwise open a file picker to load a ZIP.
+ * Show the data source selection dialog with two options:
+ * 1. Load from Working Project (active Zone Assign session)
+ * 2. Load New Project (upload a ZIP file)
  */
-async function rvLoadData() {
-    const btn = document.getElementById('rv-load-data-btn') || document.querySelector('.rv-toolbar-left .rv-btn-primary');
-    const origText = btn ? btn.innerHTML : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> Load Data';
-    if (btn) btn.innerHTML = '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;display:inline-block;margin-right:6px;"></span> Processing...';
+function rvShowDataSourceDialog() {
+    const overlay = document.getElementById('rv-datasource-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
 
-    // If we already have processed OD data from the main app, reprocess it
+    // Check if working project data is available
     const hasInSessionData =
         (typeof resolvedPlaces !== 'undefined' && Object.keys(resolvedPlaces).length > 0) ||
         (typeof allUnmatchedPlaces !== 'undefined' && allUnmatchedPlaces.length > 0);
 
-    if (hasInSessionData) {
-        rvProcessLoadedData();
-        if (btn) btn.innerHTML = origText;
-        return;
+    const workingBtn = document.getElementById('rv-btn-working-project');
+    if (workingBtn) {
+        workingBtn.disabled = !hasInSessionData;
+        workingBtn.style.opacity = hasInSessionData ? '1' : '0.4';
+        workingBtn.style.cursor = hasInSessionData ? 'pointer' : 'not-allowed';
     }
+}
 
-    // Otherwise prompt for a project ZIP
+/**
+ * Dismiss the data source dialog and go back to mode selection.
+ */
+function rvDismissDataSourceDialog() {
+    const overlay = document.getElementById('rv-datasource-overlay');
+    if (overlay) overlay.style.display = 'none';
+    rvGoBack();
+}
+
+/**
+ * Load data from the active Zone Assign / Place Assign session.
+ */
+function rvLoadFromWorkingProject() {
+    const overlay = document.getElementById('rv-datasource-overlay');
+    if (overlay) overlay.style.display = 'none';
+
+    rvProcessLoadedData();
+
+    // Show validator name dialog
+    rvShowValidatorDialog();
+}
+
+/**
+ * Prompt user to upload a project ZIP for R&V.
+ */
+async function rvLoadNewProject() {
+    const overlay = document.getElementById('rv-datasource-overlay');
+    if (overlay) overlay.style.display = 'none';
+
     try {
         let file;
         if ('showOpenFilePicker' in window) {
@@ -208,7 +243,6 @@ async function rvLoadData() {
             });
             file = await handle.getFile();
         } else {
-            // Fallback: create a temporary input
             file = await new Promise((resolve, reject) => {
                 const input = document.createElement('input');
                 input.type = 'file';
@@ -219,18 +253,24 @@ async function rvLoadData() {
         }
 
         if (!file) {
-            if (btn) btn.innerHTML = origText;
+            // User cancelled — show data source dialog again
+            rvShowDataSourceDialog();
             return;
         }
         await rvParseProjectZip(file);
+        // rvParseProjectZip already calls rvShowValidatorDialog() on success
     } catch (err) {
-        if (err.name !== 'AbortError') {
-            console.error('R&V Load Data failed:', err);
+        if (err.name === 'AbortError') {
+            // User cancelled file picker — show data source dialog again
+            rvShowDataSourceDialog();
+        } else {
+            console.error('R&V Load New Project failed:', err);
             alert('Failed to load data: ' + err.message);
+            rvShowDataSourceDialog();
         }
     }
-    if (btn) btn.innerHTML = origText;
 }
+
 
 /**
  * Parse a project ZIP independently for R&V mode.
@@ -389,57 +429,78 @@ function rvDetectIntrazonalTripsFromPlaces(places, resolutions) {
     }
 
     for (const place of places) {
-        if (!place.analytics || !place.analytics.vehicleInteractions) continue;
+        if (!place.analytics) continue;
+        if (!place.analytics.vehicleInteractions && !place.analytics.vehicleInteractionsPlaza) continue;
 
-        // Iterate through all vehicle classes and their interactions
-        for (const [vehicleClass, interactions] of Object.entries(place.analytics.vehicleInteractions)) {
-            if (!Array.isArray(interactions)) continue;
+        // Support both flat (vehicleInteractions) and plaza-keyed (vehicleInteractionsPlaza) structures
+        const iteratePlazas = place.analytics.vehicleInteractionsPlaza
+            ? Object.entries(place.analytics.vehicleInteractionsPlaza)
+            : [['', place.analytics.vehicleInteractions || {}]];
 
-            for (const interStr of interactions) {
-                // Parse "ORIGIN - DESTINATION [count]"
-                const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
-                if (!match) continue;
+        for (const [plazaName, vehicleInteractions] of iteratePlazas) {
+            if (!vehicleInteractions || typeof vehicleInteractions !== 'object') continue;
 
-                const oName = match[1].trim();
-                const dName = match[2].trim();
-                const count = parseInt(match[3], 10);
+            // Iterate through all vehicle classes and their interactions
+            for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
+                const flatInteractions = rvExtractInteractionStrings(interactions);
+                if (flatInteractions.length === 0) continue;
 
-                const oRes = rvGetResolvedData(oName, resolutionsUpper);
-                const dRes = rvGetResolvedData(dName, resolutionsUpper);
+                for (const interStr of flatInteractions) {
+                    // Parse "ORIGIN - DESTINATION [count]"
+                    const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
+                    if (!match) continue;
 
-                if (!oRes || !dRes) continue;
+                    const oName = match[1].trim();
+                    const dName = match[2].trim();
+                    const count = parseInt(match[3], 10);
 
-                // Use zone value from resolved data
-                const oZoneRaw = oRes.zone || '';
-                const dZoneRaw = dRes.zone || '';
+                    const oRes = rvGetResolvedData(oName, resolutionsUpper);
+                    const dRes = rvGetResolvedData(dName, resolutionsUpper);
 
-                if (!oZoneRaw || !dZoneRaw || oZoneRaw === 'Unknown' || dZoneRaw === 'Unknown') continue;
+                    if (!oRes || !dRes) continue;
 
-                const oZoneClean = rvCleanZoneId(oZoneRaw);
-                const dZoneClean = rvCleanZoneId(dZoneRaw);
+                    // Use zone value from resolved data
+                    const oZoneRaw = oRes.zone || '';
+                    const dZoneRaw = dRes.zone || '';
 
-                // Check for Intrazonal match
-                if (oZoneClean === dZoneClean) {
-                    const key = `${oZoneClean}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
+                    if (!oZoneRaw || !dZoneRaw || oZoneRaw === 'Unknown' || dZoneRaw === 'Unknown') continue;
 
-                    if (!tripMap.has(key)) {
-                        tripMap.set(key, {
-                            zone: oZoneClean,
-                            origin: oName,
-                            destination: dName,
-                            tripCount: 0,
-                            vehicleBreakdown: {}, // class -> count
-                            status: 'Pending',
-                            originCoords: oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null,
-                            destCoords: dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null,
-                            // To find commodities, we need the parent place's interactions
-                            parentPlace: place
-                        });
+                    const oZoneClean = rvCleanZoneId(oZoneRaw);
+                    const dZoneClean = rvCleanZoneId(dZoneRaw);
+
+                    // Check for Intrazonal match
+                    if (oZoneClean === dZoneClean) {
+                        const key = `${oZoneClean}|${oName.toUpperCase()}|${dName.toUpperCase()}`;
+
+                        if (!tripMap.has(key)) {
+                            let pCoords = null;
+                            if (plazaName) {
+                                const keys = Object.keys(rv_plazaMapping);
+                                const pmatch = keys.find(k => k.toLowerCase() === plazaName.toLowerCase());
+                                if (pmatch) pCoords = rv_plazaMapping[pmatch];
+                            }
+
+                            tripMap.set(key, {
+                                zone: oZoneClean,
+                                origin: oName,
+                                originalOrigin: oName,
+                                destination: dName,
+                                originalDestination: dName,
+                                plaza: plazaName,
+                                tripCount: 0,
+                                vehicleBreakdown: {}, // class -> count
+                                status: 'Pending',
+                                originCoords: oRes.coords || { lat: oRes.lat, lng: oRes.lng } || null,
+                                destCoords: dRes.coords || { lat: dRes.lat, lng: dRes.lng } || null,
+                                plazaCoords: pCoords,
+                                parentPlace: place
+                            });
+                        }
+
+                        const trip = tripMap.get(key);
+                        trip.tripCount += count;
+                        trip.vehicleBreakdown[vehicleClass] = (trip.vehicleBreakdown[vehicleClass] || 0) + count;
                     }
-
-                    const trip = tripMap.get(key);
-                    trip.tripCount += count;
-                    trip.vehicleBreakdown[vehicleClass] = (trip.vehicleBreakdown[vehicleClass] || 0) + count;
                 }
             }
         }
@@ -558,10 +619,13 @@ function rvDetectIntrazonalTrips(apiData, resolutions) {
             : [['', item.analytics.vehicleInteractions]];
 
         for (const [plazaName, vehicleInteractions] of iteratePlazas) {
-            for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
-                if (!Array.isArray(interactions)) continue;
+            if (!vehicleInteractions || typeof vehicleInteractions !== 'object') continue;
 
-                for (const interStr of interactions) {
+            for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
+                const flatInteractions = rvExtractInteractionStrings(interactions);
+                if (flatInteractions.length === 0) continue;
+
+                for (const interStr of flatInteractions) {
                     const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
                     if (!match) continue;
 
@@ -1264,8 +1328,11 @@ function rvInitMap() {
     rv_map = new google.maps.Map(container, {
         zoom: 5,
         center: { lat: 20.5937, lng: 78.9629 },
-        mapTypeId: 'roadmap'
+        mapTypeId: 'roadmap',
+        // Visual Centering: Shift focus to 35% from right (65% from left)
+        padding: { top: 0, bottom: 0, left: window.innerWidth * 0.30, right: 0 }
     });
+
 
     rv_mapInitialized = true;
 
@@ -1684,13 +1751,22 @@ function rvDetectIllogicalTrips(apiData, resolutions) {
     if (!apiData || !Array.isArray(apiData)) return;
 
     for (const item of apiData) {
-        if (!item.analytics || !item.analytics.vehicleInteractionsPlaza) continue;
+        if (!item.analytics) continue;
+        if (!item.analytics.vehicleInteractions && !item.analytics.vehicleInteractionsPlaza) continue;
 
-        for (const [plazaName, vehicleInteractions] of Object.entries(item.analytics.vehicleInteractionsPlaza)) {
+        // Support both flat (vehicleInteractions) and plaza-keyed (vehicleInteractionsPlaza) structures
+        const iteratePlazas = item.analytics.vehicleInteractionsPlaza
+            ? Object.entries(item.analytics.vehicleInteractionsPlaza)
+            : [['', item.analytics.vehicleInteractions || {}]];
+
+        for (const [plazaName, vehicleInteractions] of iteratePlazas) {
+            if (!vehicleInteractions || typeof vehicleInteractions !== 'object') continue;
+
             for (const [vehicleClass, interactions] of Object.entries(vehicleInteractions)) {
-                if (!Array.isArray(interactions)) continue;
+                const flatInteractions = rvExtractInteractionStrings(interactions);
+                if (flatInteractions.length === 0) continue;
 
-                for (const interStr of interactions) {
+                for (const interStr of flatInteractions) {
                     const match = interStr.match(/^(.+?) - (.+?)\s*\[(\d+)\]$/);
                     if (!match) continue;
 

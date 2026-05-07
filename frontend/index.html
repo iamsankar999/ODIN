@@ -47,7 +47,7 @@
             <div class="wizard-card" style="text-align: center;">
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
-                <p class="intro-subtitle">Origin-Destination Insight Navigator</p>
+                <p class="intro-subtitle">Origin-Destination Insights & Navigator</p>
                 <div id="odin-version-display" class="odin-version-tag">v2.5.3</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()"
@@ -438,8 +438,7 @@
                         </div>
                     </div>
 
-                    <div id="standard-analytics-view"
-                        style="display: flex; flex-direction: column; gap: 1rem;">
+                    <div id="standard-analytics-view" style="display: flex; flex-direction: column; gap: 1rem;">
                         <!-- Mod 4.2 & 4.3: Vehicle Table moved into Left Pane -->
                         <div class="analytics-card" id="vehicle-table-container">
                             <div class="table-container">
@@ -796,56 +795,48 @@
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <div id="view-review-viz" class="app-view">
         <div class="app-container" style="flex-direction: column; height: 100vh;">
-            <!-- R&V Header -->
-            <header class="rv-header">
-                <!-- Left cluster: Logo + Title + Mode label -->
-                <div class="rv-header-left">
+            <!-- R&V Header (Zone Assign Style) -->
+            <header class="app-header">
+                <!-- Group 1: Left -->
+                <div class="header-section header-left">
                     <img src="assets/logo.svg" alt="ODIN Logo" class="header-logo">
-                    <h1 class="rv-title">ODIN</h1>
-                    <span class="rv-mode-badge">Review & Visualization</span>
-                </div>
-
-                <!-- Center cluster: User, Theme, Actions -->
-                <div class="rv-header-center">
-                    <!-- User selector -->
-                    <div class="rv-user-selector" id="rv-user-selector">
-                        <button class="btn btn-sm btn-outline" onclick="rvToggleUserDropdown()" title="Select User">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <div class="logo">
+                        <h1>ODIN</h1>
+                    </div>
+                    <div class="user-selector" id="rv-user-selector-container">
+                        <div class="btn btn-sm btn-outline user-icon" onclick="rvToggleUserDropdown()"
+                            title="Select User">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                                 <circle cx="12" cy="7" r="4"></circle>
                             </svg>
-                            <span id="rv-current-user">All Users</span> ▾
-                        </button>
-                        <div class="rv-user-dropdown" id="rv-user-dropdown"></div>
+                            <span id="rv-current-user" class="current-user-text">All Users</span> ▾
+                        </div>
+                        <div class="user-dropdown" id="rv-user-dropdown"></div>
                     </div>
-
-                    <!-- Theme toggle -->
                     <div class="theme-toggle-ios">
                         <input type="checkbox" id="rv-theme-toggle" onchange="toggleTheme()">
                         <label for="rv-theme-toggle" class="toggle-track">
                             <span class="toggle-thumb" id="rv-toggle-thumb">🌙</span>
                         </label>
                     </div>
+                    <div class="mode-indicator">
+                        <span class="mode-text">Review & Visualization</span>
+                    </div>
+                </div>
 
-                    <!-- Action buttons -->
+                <!-- Group 2: Center -->
+                <div class="header-section header-center">
                     <button class="btn btn-sm btn-danger" onclick="rvGoBack()"
                         style="background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #f87171;">Back</button>
                     <button class="btn btn-sm btn-success" onclick="rvSave()" title="Save Progress">Save</button>
-                    <button class="btn btn-sm btn-outline" onclick="rvLoadData()" title="Load Data">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="17 8 12 3 7 8"></polyline>
-                            <line x1="12" y1="3" x2="12" y2="15"></line>
-                        </svg>
-                        Load Data
-                    </button>
                     <button class="btn btn-sm btn-outline" onclick="rvExport()" title="Export">Export</button>
                 </div>
 
-                <!-- Right cluster: Slider switch + status + close -->
-                <div class="rv-header-right">
+                <!-- Group 3: Right -->
+                <div class="header-section header-right"
+                    style="flex:1; display:flex; align-items:center; justify-content:flex-end; gap:0.75rem;">
                     <!-- Intrazonal <> Illogical Pairs liquid slider -->
                     <div class="rv-tab-switch" id="rv-tab-switch">
                         <div class="rv-tab-slider" id="rv-tab-slider"></div>
@@ -857,13 +848,11 @@
                         </button>
                     </div>
 
-                    <!-- Backend status -->
                     <div class="status-indicator" title="Backend Status">
                         <span class="status-dot" id="rv-system-dot"></span>
                     </div>
 
-                    <!-- Shutdown -->
-                    <button class="btn btn-sm btn-outline" id="rv-shutdown-btn" title="Shutdown ODIN"
+                    <button id="rv-shutdown-btn" class="btn btn-sm btn-outline" title="Shutdown ODIN"
                         onclick="shutdownApp()"
                         style="color: var(--danger); border-color: var(--danger); background: rgba(239,68,68,0.05); font-size:1.2rem; padding: 0 0.5rem; height:32px;">✕</button>
                 </div>
@@ -897,9 +886,7 @@
                                                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                                     <circle cx="12" cy="12" r="3"></circle>
                                                 </svg>
-                                                <p>Load project data to detect intrazonal trips</p>
-                                                <button class="btn btn-sm btn-primary" onclick="rvLoadData()"
-                                                    style="margin-top: 0.5rem;">Load Data</button>
+                                                <p>No intrazonal trips detected</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -931,9 +918,7 @@
                                                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                                     <circle cx="12" cy="12" r="3"></circle>
                                                 </svg>
-                                                <p>Load project data to detect illogical trips</p>
-                                                <button class="btn btn-sm btn-primary" onclick="rvLoadData()"
-                                                    style="margin-top: 0.5rem;">Load Data</button>
+                                                <p>No illogical trips detected</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -964,6 +949,31 @@
                     </div>
                 </section>
             </main>
+        </div>
+    </div>
+
+    <!-- R&V Data Source Selection Dialog -->
+    <div class="rv-validator-overlay" id="rv-datasource-overlay" style="display: none;">
+        <div class="rv-validator-dialog" style="width: 440px;">
+            <div class="rv-validator-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </div>
+            <h3 class="rv-validator-title">Review & Visualization</h3>
+            <p class="rv-validator-desc">Choose how to load your project data for review.</p>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <button class="rv-validator-btn" id="rv-btn-working-project" onclick="rvLoadFromWorkingProject()">
+                    Load from Working Project
+                </button>
+                <button class="rv-validator-btn rv-btn-secondary" id="rv-btn-new-project" onclick="rvLoadNewProject()">
+                    Load New Project (ZIP)
+                </button>
+                <button class="rv-ds-cancel-btn" onclick="rvDismissDataSourceDialog()">
+                    Cancel
+                </button>
+            </div>
         </div>
     </div>
 
