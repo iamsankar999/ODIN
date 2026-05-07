@@ -795,6 +795,30 @@
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <div id="view-review-viz" class="app-view">
         <div class="app-container" style="flex-direction: column; height: 100vh;">
+
+            <!-- R&V Full-Screen Loading Overlay -->
+            <div id="rv-loading-overlay" style="display:none; position:fixed; inset:0; z-index:9999;
+                background: rgba(10,14,26,0.88); backdrop-filter: blur(6px);
+                flex-direction: column; align-items: center; justify-content: center; gap: 1.5rem;
+                pointer-events: all;">
+                <div style="position:relative; width:64px; height:64px;">
+                    <div style="position:absolute; inset:0; border-radius:50%;
+                        border:4px solid rgba(99,179,237,0.15); border-top-color:#63b3ed;
+                        animation: rv-spin 0.9s linear infinite;"></div>
+                    <div style="position:absolute; inset:8px; border-radius:50%;
+                        border:4px solid rgba(154,107,254,0.15); border-bottom-color:#9a6bfe;
+                        animation: rv-spin 1.4s linear infinite reverse;"></div>
+                </div>
+                <p class="rv-loading-message" style="color:#e2e8f0; font-size:0.95rem;
+                    font-weight:500; letter-spacing:0.03em; margin:0;
+                    font-family: Inter, sans-serif;">Loading project data...</p>
+                <p style="color:#64748b; font-size:0.8rem; margin:0;
+                    font-family: Inter, sans-serif;">Please wait — do not close this window</p>
+            </div>
+            <style>
+                @keyframes rv-spin { to { transform: rotate(360deg); } }
+            </style>
+
             <!-- R&V Header (Zone Assign Style) -->
             <header class="app-header">
                 <!-- Group 1: Left -->

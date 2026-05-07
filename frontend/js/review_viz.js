@@ -218,10 +218,16 @@ function rvLoadFromWorkingProject() {
     const overlay = document.getElementById('rv-datasource-overlay');
     if (overlay) overlay.style.display = 'none';
 
-    rvProcessLoadedData();
+    // Show loading overlay to block interaction
+    rvShowLoadingOverlay('Processing working project data...');
 
-    // Show validator name dialog
-    rvShowValidatorDialog();
+    // Defer so the overlay paints before heavy sync work
+    setTimeout(() => {
+        rvProcessLoadedData();
+        rvHideLoadingOverlay();
+        // Show validator name dialog
+        rvShowValidatorDialog();
+    }, 50);
 }
 
 /**
@@ -257,9 +263,11 @@ async function rvLoadNewProject() {
             rvShowDataSourceDialog();
             return;
         }
+        rvShowLoadingOverlay('Parsing project bundle...');
         await rvParseProjectZip(file);
         // rvParseProjectZip already calls rvShowValidatorDialog() on success
     } catch (err) {
+        rvHideLoadingOverlay();
         if (err.name === 'AbortError') {
             // User cancelled file picker — show data source dialog again
             rvShowDataSourceDialog();
@@ -316,6 +324,8 @@ async function rvParseProjectZip(file) {
         if (!resp.ok) throw new Error(await resp.text());
         const result = await resp.json();
 
+        rvShowLoadingOverlay('Uploading shapefile...');
+
         // Upload shapefile too if present
         let shpFile = zip.file('shapefile.zip') || zip.file('Shapefile_Original.zip');
         if (!shpFile) {
@@ -330,6 +340,8 @@ async function rvParseProjectZip(file) {
             await fetch('/api/upload/shapefile', { method: 'POST', body: shpForm });
             rv_shapefileGdf = true;
         }
+
+        rvShowLoadingOverlay('Detecting intrazonal & illogical trips...');
 
         // Load resolutions to get zone assignments
         const resFile = zip.file('resolutions.json');
@@ -357,10 +369,13 @@ async function rvParseProjectZip(file) {
         }
         rv_dataLoaded = true;
 
+        rvHideLoadingOverlay();
+
         // Show validator name dialog
         rvShowValidatorDialog();
 
     } catch (err) {
+        rvHideLoadingOverlay();
         console.error('R&V data parsing failed:', err);
         alert('Failed to parse dataset: ' + err.message);
     }
@@ -1201,13 +1216,16 @@ async function rvApplyResolution(newLat, newLng, newName, point) {
         });
 
         rvCloseSearch();
-        rvSave(); // autosave
+        rvSave(true); // silent autosave — no dialog popup
 
+        // Always re-render BOTH tables so cross-tab status stays in sync
+        rvRenderIntrazonalTable();
+        rvRenderIllogicalTable();
+
+        // Refresh map view for the active tab
         if (rv_currentSubTab === 'intrazonal') {
-            rvRenderIntrazonalTable();
             rvMapView(rv_editingTripIdx);
         } else {
-            rvRenderIllogicalTable();
             rvMapViewIllogical(rv_editingTripIdx);
         }
 
@@ -1425,7 +1443,24 @@ async function rvGeocode(placeName) {
 
 // ── Save / Export ─────────────────────────────────────────────────────────────
 
-function rvSave() {
+// ── R&V Loading Overlay ───────────────────────────────────────────────────────
+
+function rvShowLoadingOverlay(message = 'Loading project data...') {
+    let overlay = document.getElementById('rv-loading-overlay');
+    if (!overlay) return;
+    const msgEl = overlay.querySelector('.rv-loading-message');
+    if (msgEl) msgEl.textContent = message;
+    overlay.style.display = 'flex';
+}
+
+function rvHideLoadingOverlay() {
+    const overlay = document.getElementById('rv-loading-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+// ── Save ─────────────────────────────────────────────────────────────────────
+
+function rvSave(silent = false) {
     // Save R&V state into sessionStorage
     try {
         const state = {
@@ -1433,10 +1468,10 @@ function rvSave() {
             currentSubTab: rv_currentSubTab
         };
         sessionStorage.setItem('rv_state', JSON.stringify(state));
-        alert('Review & Visualization progress saved.');
+        if (!silent) alert('Review & Visualization progress saved.');
     } catch (e) {
         console.error('R&V save failed:', e);
-        alert('Save failed: ' + e.message);
+        if (!silent) alert('Save failed: ' + e.message);
     }
 }
 
@@ -1903,7 +1938,7 @@ function rvRenderIllogicalTable() {
                     </div>
                 </td>
                 <td class="rv-cell-status">
-                    <span class="rv-status-badge ${statusClass}">${trip.status}</span>
+                    <span class="rv-status-badge ${statusClass}">${trip.status === 'Removed from data' ? 'Deleted' : trip.status}</span>
                 </td>
             </tr>
             <tr class="rv-details-row" id="rv-ill-details-${idx}" style="display: none;">
@@ -2085,7 +2120,7 @@ function rvShowDetailsIllogical(idx) {
                 <h4>Resolution</h4>
                 ${trip.status !== 'Pending' ? `
                     <div style="margin-bottom: 1rem;">
-                        <span class="rv-status-badge ${trip.status === 'Removed from data' ? 'rv-status-removed' : 'rv-status-resolved'}">${trip.status}</span>
+                        <span class="rv-status-badge ${trip.status === 'Removed from data' ? 'rv-status-removed' : 'rv-status-resolved'}">${trip.status === 'Removed from data' ? 'Deleted' : trip.status}</span>
                     </div>
                 ` : '<div style="margin-bottom: 1rem;"><span class="rv-status-badge rv-status-pending">Pending</span></div>'}
             </div>
