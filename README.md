@@ -47,6 +47,12 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
 *   **[`ODIN_Launch.bat`](ODIN_Launch.bat)**: Automates the startup sequence (installs deps, starts backend, opens browser).
 *   **[`python-embed/`](python-embed/)**: (Optional) A local, zero-install Python environment for portability.
 *   **[`version.json`](version.json)**: Tracks the current system version for synchronization across modules.
+### 📁 Sample Data ([`/Dummy Data`](Dummy%20Data/))
+To help you get started quickly, a sample dataset is included for testing purposes:
+*   **[`od_dataset.xlsx`](Dummy%20Data/od_dataset.xlsx)**: A pre-formatted Excel survey containing sample origin, destination, and plaza entries.
+*   **[`testdata_shapefile.zip`](Dummy%20Data/testdata_shapefile.zip)**: A sample zonal shapefile for Point-in-Polygon (PIP) validation testing.
+
+
 
 ---
 
@@ -80,6 +86,9 @@ A FastAPI-powered REST layer handling heavy computational geometry and data proc
     *   Install dependencies.
     *   Start the FastAPI server.
     *   Launch the ODIN dashboard in your default browser.
+4.  **Try it out**: Use the sample files in the `/Dummy Data` folder to test the system immediately.
+
+
 
 ### Manual Setup
 1. Install dependencies:
