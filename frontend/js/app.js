@@ -12,7 +12,7 @@ let plazaMapping = {}; // { "Plaza Name": { lat, lng } }
 let pickingPlaza = null; // Currently being picked from map
 let filesUploaded = { shp: false, od: false };
 let currentUser = "All Users";
-let selectedState = "All States"; // Global state filter
+let selectedStates = []; // Global state filter (empty means All States)
 let currentMode = "Zone assign"; // New Mode state
 let map; // Google Maps Instance
 let markers = []; // Track active map markers
@@ -964,6 +964,80 @@ function clearAnalytics() {
     document.getElementById('commodity-body').innerHTML = `<tr class="empty-state"><td colspan="9">No data</td></tr>`;
 }
 
+function renderPreliminaryAnalysis(data) {
+    const container = document.getElementById('preliminary-analysis-container');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (!data || Object.keys(data).length === 0) {
+        container.innerHTML = `<div style="text-align: center; color: var(--text-secondary);">No preliminary data available</div>`;
+        return;
+    }
+    
+    const vehicles = ['CAR', 'MB', 'GB', 'ML', 'LGV', '2T', '3T', '4T', '5T', '6T'];
+    
+    for (const plaza in data) {
+        const directions = data[plaza];
+        
+        const section = document.createElement('div');
+        section.className = 'plaza-analysis-section';
+        
+        const heading = document.createElement('h4');
+        heading.style.marginBottom = '1rem';
+        heading.style.color = 'var(--text-primary)';
+        heading.style.borderBottom = '1px solid var(--border)';
+        heading.style.paddingBottom = '0.5rem';
+        heading.textContent = plaza;
+        section.appendChild(heading);
+        
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'table-container';
+        
+        const table = document.createElement('table');
+        table.className = 'data-table';
+        
+        const thead = document.createElement('thead');
+        let theadHtml = `<tr><th style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.1);">Direction</th>`;
+        vehicles.forEach(v => {
+            theadHtml += `<th style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.1);">${v}</th>`;
+        });
+        theadHtml += `<th style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.1);">Total</th></tr>`;
+        thead.innerHTML = theadHtml;
+        table.appendChild(thead);
+        
+        const tbody = document.createElement('tbody');
+        
+        for (const dir in directions) {
+            const counts = directions[dir];
+            let rowHtml = `<td>${dir}</td>`;
+            let total = 0;
+            
+            vehicles.forEach(v => {
+                const count = counts[v] || 0;
+                total += count;
+                rowHtml += `<td>${count}</td>`;
+            });
+            
+            rowHtml += `<td><strong>${total}</strong></td>`;
+            
+            const tr = document.createElement('tr');
+            tr.innerHTML = rowHtml;
+            tbody.appendChild(tr);
+        }
+        
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+        section.appendChild(tableContainer);
+        
+        container.appendChild(section);
+    }
+}
+
+function closePreliminaryAnalysisModal() {
+    const modal = document.getElementById('preliminary-analysis-modal');
+    if (modal) modal.classList.remove('active');
+}
+
 async function handleFileUpload(event, isFromZip = false) {
     const file = event.target ? event.target.files[0] : event;
     if (!file) return;
@@ -1084,6 +1158,13 @@ async function handleFileUpload(event, isFromZip = false) {
 
             filterPlacesByUser();
             checkWizardCompletion();
+            
+            // Render Preliminary Analysis if present and in Zone assign mode
+            if (result.preliminary_analysis && currentMode === "Zone assign") {
+                renderPreliminaryAnalysis(result.preliminary_analysis);
+                document.getElementById('preliminary-analysis-modal').classList.add('active');
+            }
+            
             // Silent success
         } else {
             alert(`Upload succeeded, but no unique OD pairs were found (Total records: ${result.total_rows || 0})`);
@@ -2296,8 +2377,8 @@ async function renderCurrentPlace() {
                 params.append('zone_restriction', place.assigned_zone);
             }
 
-            if (selectedState && selectedState !== "All States") {
-                params.append('state', selectedState);
+            if (selectedStates && selectedStates.length > 0) {
+                params.append('state', selectedStates.join(','));
             }
 
             const response = await fetch(`http://localhost:8000/api/suggestions?${params.toString()}`);
@@ -3440,36 +3521,81 @@ function renderStateDropdown() {
 
     const listContainer = document.createElement("div");
     listContainer.className = "state-dropdown-list";
+    listContainer.onclick = (e) => e.stopPropagation(); // Keep open when clicking inside
     dropdown.appendChild(listContainer);
 
     // Add "All States" option
-    const allOpt = document.createElement("div");
-    allOpt.className = "state-item" + (selectedState === "All States" ? " active" : "");
-    allOpt.textContent = "All States";
-    allOpt.onclick = () => selectState("All States");
+    const allOpt = document.createElement("label");
+    allOpt.className = "state-item" + (selectedStates.length === 0 ? " active" : "");
+    allOpt.style.display = "flex";
+    allOpt.style.alignItems = "center";
+    allOpt.style.gap = "8px";
+    allOpt.style.cursor = "pointer";
+    allOpt.innerHTML = `<input type="checkbox" ${selectedStates.length === 0 ? 'checked' : ''} onchange="toggleAllStates(this)"> All States`;
     listContainer.appendChild(allOpt);
 
     INDIAN_STATES.forEach(state => {
-        const item = document.createElement("div");
-        item.className = "state-item" + (selectedState === state ? " active" : "");
-        item.textContent = state;
-        item.onclick = () => selectState(state);
+        const isChecked = selectedStates.includes(state);
+        const item = document.createElement("label");
+        item.className = "state-item" + (isChecked ? " active" : "");
+        item.style.display = "flex";
+        item.style.alignItems = "center";
+        item.style.gap = "8px";
+        item.style.cursor = "pointer";
+        item.innerHTML = `<input type="checkbox" value="${state}" ${isChecked ? 'checked' : ''} onchange="toggleStateSelection(this)"> ${state}`;
         listContainer.appendChild(item);
     });
+
+    // Add Apply Button
+    const applyBtn = document.createElement("button");
+    applyBtn.className = "btn btn-sm btn-primary";
+    applyBtn.style.width = "100%";
+    applyBtn.style.marginTop = "8px";
+    applyBtn.textContent = "Apply Filter";
+    applyBtn.onclick = (e) => {
+        e.stopPropagation();
+        applyStateFilter();
+    };
+    listContainer.appendChild(applyBtn);
 }
 
+function toggleAllStates(cb) {
+    if (cb.checked) {
+        selectedStates = [];
+        renderStateDropdown();
+    } else {
+        cb.checked = true; // Cannot uncheck "All States" directly, must select a state
+    }
+}
 
-function selectState(stateName) {
-    selectedState = stateName;
+function toggleStateSelection(cb) {
+    if (cb.checked) {
+        if (!selectedStates.includes(cb.value)) {
+            selectedStates.push(cb.value);
+        }
+    } else {
+        selectedStates = selectedStates.filter(s => s !== cb.value);
+    }
+    renderStateDropdown();
+}
 
+function applyStateFilter() {
     // Update button label
     const label = document.getElementById("state-filter-label");
-    if (label) label.textContent = stateName === "All States" ? "State" : stateName;
+    if (label) {
+        if (selectedStates.length === 0) {
+            label.textContent = "State";
+        } else if (selectedStates.length === 1) {
+            label.textContent = selectedStates[0];
+        } else {
+            label.textContent = `${selectedStates.length} States`;
+        }
+    }
 
     // Visually highlight filter btn when a state is active  
     const btn = document.getElementById("state-filter-btn");
     if (btn) {
-        if (stateName && stateName !== "All States") {
+        if (selectedStates.length > 0) {
             btn.style.borderColor = "var(--accent)";
             btn.style.color = "var(--accent)";
         } else {

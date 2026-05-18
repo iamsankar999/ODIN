@@ -2,7 +2,7 @@
 
 **ODIN** is a professional-grade geospatial validation and analytical platform designed to automate the complex process of Origin-Destination (OD) data coding. It transforms raw, manually-surveyed place names into validated, geocoded, and zone-mapped datasets.
 
-![Version](https://img.shields.io/badge/version-v2.5.3_beta-blue.svg)
+![Version](https://img.shields.io/badge/version-v2.5.4-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-green.svg)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet.js-orange.svg)

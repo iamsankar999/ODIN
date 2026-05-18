@@ -48,7 +48,7 @@
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insights & Navigator</p>
-                <div id="odin-version-display" class="odin-version-tag">v2.5.3_beta</div>
+                <div id="odin-version-display" class="odin-version-tag">v2.5.4</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()"
                         style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
@@ -583,6 +583,23 @@
             </div>
         </div>
 
+        <!-- Preliminary Analysis Modal -->
+        <div id="preliminary-analysis-modal" class="modal-overlay">
+            <div class="modal-content"
+                style="width: 800px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px) saturate(1.8); -webkit-backdrop-filter: blur(12px) saturate(1.8); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);">
+                <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                    <h3>Preliminary Analysis</h3>
+                </div>
+                <div class="modal-body custom-scroll" id="preliminary-analysis-container"
+                    style="overflow-y: auto; flex: 1; padding: 1.5rem; display: flex; flex-direction: column; gap: 2rem;">
+                    <!-- Data will be populated dynamically -->
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="closePreliminaryAnalysisModal()">Continue Setup</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Back Options Modal -->
         <div id="back-modal" class="modal-overlay">
             <div class="modal-content" style="width: 400px; text-align: center;">
@@ -816,7 +833,11 @@
                     font-family: Inter, sans-serif;">Please wait — do not close this window</p>
             </div>
             <style>
-                @keyframes rv-spin { to { transform: rotate(360deg); } }
+                @keyframes rv-spin {
+                    to {
+                        transform: rotate(360deg);
+                    }
+                }
             </style>
 
             <!-- R&V Header (Zone Assign Style) -->

@@ -163,12 +163,43 @@ async def upload_excel(
 
             return obj
 
+        # --- Calculate Preliminary Analysis Data ---
+        import pandas as pd
+        preliminary_analysis = {}
+        prelim_df = pd.DataFrame(parsed_data["main_data"])
+        if not prelim_df.empty:
+            rename_dict = {}
+            for col in prelim_df.columns:
+                stripped_col = str(col).strip().upper()
+                if stripped_col in ['PLAZA_NAME', 'DIRECTION', 'MAV_SPLIT'] and col != stripped_col:
+                    rename_dict[col] = stripped_col
+            prelim_df = prelim_df.rename(columns=rename_dict)
+            
+            if 'PLAZA_NAME' in prelim_df.columns and 'DIRECTION' in prelim_df.columns and 'MAV_SPLIT' in prelim_df.columns:
+                grouped = prelim_df.groupby(['PLAZA_NAME', 'DIRECTION', 'MAV_SPLIT']).size().reset_index(name='count')
+                for _, row in grouped.iterrows():
+                    plaza = str(row['PLAZA_NAME']).strip()
+                    direction = str(row['DIRECTION']).strip()
+                    mav = str(row['MAV_SPLIT']).strip()
+                    count = int(row['count'])
+                    
+                    if not plaza or plaza.upper() == 'NAN': continue
+                    if not direction or direction.upper() == 'NAN': direction = "Unknown"
+                    if not mav or mav.upper() == 'NAN': continue
+                    
+                    if plaza not in preliminary_analysis:
+                        preliminary_analysis[plaza] = {}
+                    if direction not in preliminary_analysis[plaza]:
+                        preliminary_analysis[plaza][direction] = {}
+                    preliminary_analysis[plaza][direction][mav] = count
+
         response_data = {
             "message": "Excel file parsed successfully",
             "total_rows": len(parsed_data["main_data"]),
             "ca_codes_abstract": parsed_data.get("ca_codes_abstract", []),
             "ca_codes_detailed": parsed_data.get("ca_codes_detailed", []),
             "resolved_raw_od": parsed_data.get("resolved_raw_od", []),
+            "preliminary_analysis": preliminary_analysis,
             "data": processed_data
         }
         return clean_json(response_data)

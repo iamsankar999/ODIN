@@ -320,36 +320,56 @@ def generate_suggestions(target_name: str, limit: int = 10, plaza_coords: list =
             name_to_geocode = item["name"]
             results = []
             try:
-                # Build query string
-                search_query = f"{name_to_geocode}, India"
+                states_list = []
                 if state and state != "All States":
-                    search_query = f"{name_to_geocode}, {state}, India"
+                    states_list = [s.strip() for s in state.split(",")]
 
-                # PRIMARY: Use Places Text Search for multiple results
+                queries_to_run = []
+                if states_list:
+                    for st in states_list:
+                        queries_to_run.append((st, f"{name_to_geocode}, {st}, India"))
+                else:
+                    queries_to_run.append((None, f"{name_to_geocode}, India"))
+
                 place_entries = []
-                try:
-                    places_result = client.places(query=search_query)
-                    if places_result and places_result.get('results'):
-                        place_entries = places_result['results']
-                except Exception:
-                    pass  # Fallback below
+                
+                for st, search_query in queries_to_run:
+                    # PRIMARY: Use Places Text Search for multiple results
+                    current_entries = []
+                    try:
+                        places_result = client.places(query=search_query)
+                        if places_result and places_result.get('results'):
+                            current_entries = places_result['results']
+                    except Exception:
+                        pass  # Fallback below
 
-                # FALLBACK: If Places API returned nothing, try geocode()
-                if not place_entries:
-                    geo_result = client.geocode(search_query)
-                    if geo_result:
-                        for g in geo_result:
-                            place_entries.append({
-                                "name": name_to_geocode,
-                                "geometry": g.get("geometry", {}),
-                                "formatted_address": g.get("formatted_address", "")
-                            })
+                    # FALLBACK: If Places API returned nothing, try geocode()
+                    if not current_entries:
+                        try:
+                            geo_result = client.geocode(search_query)
+                            if geo_result:
+                                for g in geo_result:
+                                    current_entries.append({
+                                        "name": name_to_geocode,
+                                        "geometry": g.get("geometry", {}),
+                                        "formatted_address": g.get("formatted_address", "")
+                                    })
+                        except Exception:
+                            pass
+                            
+                    # Tag entries with the requested state for filtering later
+                    for entry in current_entries:
+                        entry['_requested_state'] = st
+                    
+                    place_entries.extend(current_entries)
 
                 for geo_entry in place_entries:
+                    req_st = geo_entry.get('_requested_state')
+                    formatted_address = geo_entry.get("formatted_address", "")
+                    
                     # State verification via formatted_address
-                    if state and state != "All States":
-                        addr = geo_entry.get("formatted_address", "")
-                        if state.lower() not in addr.lower():
+                    if req_st:
+                        if req_st.lower() not in formatted_address.lower():
                             continue
 
                     geom = geo_entry.get("geometry", {}).get("location", {})
@@ -360,7 +380,6 @@ def generate_suggestions(target_name: str, limit: int = 10, plaza_coords: list =
 
                     # Use Google's own name for the place, NOT the DB name
                     google_name = geo_entry.get("name", name_to_geocode)
-                    formatted_address = geo_entry.get("formatted_address", "")
 
                     # Detect Google Plus Codes (e.g. "RH9V+7W9") and replace
                     # with the first meaningful part of formatted_address
@@ -374,8 +393,8 @@ def generate_suggestions(target_name: str, limit: int = 10, plaza_coords: list =
                             google_name = addr_parts[1]
 
                     # Strip state/pincode/India from address when state filter active
-                    if state and state != "All States":
-                        formatted_address = clean_formatted_address(formatted_address, state)
+                    if req_st:
+                        formatted_address = clean_formatted_address(formatted_address, req_st)
 
                     result_item = {
                         "name": google_name,
