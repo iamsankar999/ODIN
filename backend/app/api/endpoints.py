@@ -676,6 +676,11 @@ echo  Update applied successfully!
 echo  Restarting ODIN...
 echo.
 
+:: Kill any lingering ODIN console windows (matched by window title)
+:: so only the freshly launched terminal remains.
+taskkill /fi "WINDOWTITLE eq ODIN - OD Validation System" /f >nul 2>&1
+timeout /t 1 /nobreak >nul
+
 :: Relaunch ODIN with --no-browser flag (existing browser tab will auto-reload)
 start "" "ODIN_Launch.bat" --no-browser
 

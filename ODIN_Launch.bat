@@ -157,6 +157,13 @@ pushd "%BACKEND%"
 popd
 
 :: Reached here only if uvicorn exits (user Ctrl+C or crash)
+:: If _apply_update.bat exists, an auto-update is in progress — exit silently
+:: so this old terminal closes and only the new one remains.
+if exist "%ROOT%\_apply_update.bat" (
+    echo.
+    echo  Auto-update in progress. This window will close automatically.
+    exit
+)
 echo.
 echo  ODIN server has stopped.
 echo  Press any key to close this window.
