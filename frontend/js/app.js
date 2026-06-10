@@ -390,6 +390,7 @@ function selectModeForSetup(mode) {
     const odBtn    = document.getElementById('wizard-od-btn');
     const shpInput = document.getElementById('wizard-shapefile-upload');
     const odInput  = document.getElementById('wizard-od-upload');
+    const openProjectPanel = document.getElementById('panel-open-project');
 
     if (mode === 'Place assign') {
         // Button 1: Upload new zoning shapefile
@@ -397,11 +398,13 @@ function selectModeForSetup(mode) {
         // Button 2: Upload Zone Assign ZIP (not an Excel)
         if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload Zone Assign ZIP';
         if (odInput) odInput.accept = '.zip';
+        if (openProjectPanel) openProjectPanel.style.display = 'none';
     } else {
         // Restore Zone Assign defaults
         if (shpBtn && shpBtn.childNodes[0]) shpBtn.childNodes[0].textContent = 'Upload Shapefile';
         if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload OD Dataset';
         if (odInput) odInput.accept = '.csv,.xlsx';
+        if (openProjectPanel) openProjectPanel.style.display = '';
     }
 }
 
@@ -426,7 +429,9 @@ async function startTask() {
     showLoading(`Setting up ${currentMode} Task...`);
 
     try {
-        if (currentSetupTab === 'open') {
+        if (currentMode === 'Place assign') {
+            plazaMappingConfirmed = true;
+        } else if (currentSetupTab === 'open') {
             // Project zip is already parsed in handleProjectZipUpload
             plazaMappingConfirmed = Object.keys(plazaMapping).length > 0;
         } else {
@@ -1303,33 +1308,43 @@ function selectMode(mode) {
     const surveyMappingPane = document.getElementById('survey-mapping-pane');
     const standardView = document.getElementById('standard-analytics-view');
     const navigator = document.querySelector('.place-navigator');
+    const leftPane = document.querySelector('.left-pane');
 
     // Header elements to hide during survey verification
     const reviewContainer = document.getElementById('review-selector-container');
     const manualSelectCard = document.querySelector('.manual-select-card');
     const manualSearchCard = document.querySelector('.manual-search-card');
 
-    if (!plazaMappingConfirmed && uniquePlazas.length > 0) {
-        if (surveyMappingPane) surveyMappingPane.style.display = 'flex';
-        if (standardView) standardView.style.display = 'none';
+    if (mode === 'Place assign') {
+        if (leftPane) leftPane.style.display = 'none';
         if (navigator) navigator.style.display = 'none';
-        // Hide header Review, +, and Search during survey verification
         if (reviewContainer) reviewContainer.style.display = 'none';
         if (manualSelectCard) manualSelectCard.style.display = 'none';
         if (manualSearchCard) manualSearchCard.style.display = 'none';
-        renderPlazaMappingView();
-    } else {
         if (surveyMappingPane) surveyMappingPane.style.display = 'none';
-        if (standardView) standardView.style.display = 'flex';
-        if (navigator) navigator.style.display = 'flex';
-        // Show header Review, +, and Search after confirmation
-        if (reviewContainer) reviewContainer.style.display = '';
-        if (manualSelectCard) manualSelectCard.style.display = '';
-        if (manualSearchCard) manualSearchCard.style.display = '';
+        if (standardView) standardView.style.display = 'none';
 
-        // ── Place Assign: render all resolved places + plazas over the new shapefile ──
-        if (mode === 'Place assign') {
-            renderPlaceAssignInitialMap();
+        renderPlaceAssignInitialMap();
+    } else {
+        if (leftPane) leftPane.style.display = 'flex';
+
+        if (!plazaMappingConfirmed && uniquePlazas.length > 0) {
+            if (surveyMappingPane) surveyMappingPane.style.display = 'flex';
+            if (standardView) standardView.style.display = 'none';
+            if (navigator) navigator.style.display = 'none';
+            // Hide header Review, +, and Search during survey verification
+            if (reviewContainer) reviewContainer.style.display = 'none';
+            if (manualSelectCard) manualSelectCard.style.display = 'none';
+            if (manualSearchCard) manualSearchCard.style.display = 'none';
+            renderPlazaMappingView();
+        } else {
+            if (surveyMappingPane) surveyMappingPane.style.display = 'none';
+            if (standardView) standardView.style.display = 'flex';
+            if (navigator) navigator.style.display = 'flex';
+            // Show header Review, +, and Search after confirmation
+            if (reviewContainer) reviewContainer.style.display = '';
+            if (manualSelectCard) manualSelectCard.style.display = '';
+            if (manualSearchCard) manualSearchCard.style.display = '';
         }
     }
 
@@ -1344,10 +1359,12 @@ function selectMode(mode) {
     const subDropdown = document.getElementById('mode-sub-dropdown');
     if (subDropdown) subDropdown.classList.add('collapsed-sub');
 
-    // Re-filter the places based on the new mode
-    allUnmatchedPlaces.forEach(p => { p.suggestions = []; });
-    filterPlacesByUser();
-    if (unmatchedPlaces.length > 0) renderCurrentPlace();
+    if (mode !== 'Place assign') {
+        // Re-filter the places based on the new mode
+        allUnmatchedPlaces.forEach(p => { p.suggestions = []; });
+        filterPlacesByUser();
+        if (unmatchedPlaces.length > 0) renderCurrentPlace();
+    }
 }
 
 // ── Place Assign helpers ─────────────────────────────────────────────────────
@@ -1719,6 +1736,10 @@ function confirmPlazaMapping() {
 
 
 function filterPlacesByUser() {
+    if (currentMode === 'Place assign') {
+        unmatchedPlaces = [];
+        return;
+    }
     let filtered = [...allUnmatchedPlaces];
 
     // Filter by User
