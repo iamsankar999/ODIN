@@ -48,7 +48,7 @@
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insights & Navigator</p>
-                <div id="odin-version-display" class="odin-version-tag">v2.5.8_beta</div>
+                <div id="odin-version-display" class="odin-version-tag">v2.5.8</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()"
                         style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
@@ -191,14 +191,17 @@
                                     </svg>
                                     User Setup
                                 </span>
-                                <button id="user-setup-edit-btn" class="btn btn-sm btn-outline" style="padding:2px 12px; font-size:0.78rem; display:none;" onclick="toggleUserSetupEdit()">Edit</button>
+                                <button id="user-setup-edit-btn" class="btn btn-sm btn-outline"
+                                    style="padding:2px 12px; font-size:0.78rem; display:none;"
+                                    onclick="toggleUserSetupEdit()">Edit</button>
                             </h4>
                             <!-- Wrapper locked when project ZIP is loaded -->
                             <div id="user-setup-fields">
-                                <div style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
+                                <div
+                                    style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
                                     <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
-                                    <input type="number" id="wizard-user-count" class="user-count-input" value="1" min="1"
-                                        max="20" onchange="generateWizardUserInputs()">
+                                    <input type="number" id="wizard-user-count" class="user-count-input" value="1"
+                                        min="1" max="20" onchange="generateWizardUserInputs()">
                                 </div>
                                 <div id="wizard-user-names" class="custom-scroll"
                                     style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
