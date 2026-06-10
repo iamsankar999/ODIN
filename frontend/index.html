@@ -174,50 +174,36 @@
                                 style="text-align: center; margin-top: 0.5rem;">
                                 <span id="status-zip" class="status-pending">●</span> No ZIP selected
                             </div>
-
-                            <!-- User Info from Loaded ZIP -->
-                            <div id="open-project-user-info" style="display:none; margin-top:12px; border-top:1px solid rgba(148,163,184,0.2); padding-top:12px;">
-                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-                                    <span style="font-size:0.85rem; color:#94a3b8;">Saved Users:</span>
-                                    <button class="btn btn-sm btn-outline" style="padding:2px 10px; font-size:0.78rem;" onclick="toggleOpenProjectUserEdit()">Edit</button>
-                                </div>
-                                <!-- Read-only display -->
-                                <div id="open-project-user-display" style="font-size:0.85rem; color:#e2e8f0;"></div>
-                                <!-- Edit controls (hidden by default) -->
-                                <div id="open-project-user-edit" style="display:none; margin-top:8px;">
-                                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                                        <span style="font-size:0.82rem; color:#94a3b8;">User Count:</span>
-                                        <input type="number" id="open-project-user-count" class="user-count-input" value="1" min="1" max="20" onchange="regenerateOpenProjectUserInputs()">
-                                    </div>
-                                    <div id="open-project-user-names" style="display:flex; flex-direction:column; gap:5px;"></div>
-                                    <button class="btn btn-sm btn-primary" style="width:100%; margin-top:8px; padding:5px;" onclick="applyOpenProjectUserEdit()">Apply Changes</button>
-                                </div>
-                            </div>
                         </div>
                     </div>
 
                     <!-- User Setup Column -->
                     <div class="setup-column-right">
                         <div class="onboarding-card" style="height: 100%; display: flex; flex-direction: column;">
-                            <h4>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M17 21v-2a4 2 0 0 0-4-4H5a4 2 0 0 0-4 4v2"></path>
-                                    <circle cx="9" cy="7" r="4"></circle>
-                                    <path d="M23 21v-2a4 2 0 0 0-3-3.87"></path>
-                                    <path d="M16 3.13a4 2 0 0 1 0 7.75"></path>
-                                </svg>
-                                User Setup
+                            <h4 style="display:flex; align-items:center; justify-content:space-between;">
+                                <span style="display:flex; align-items:center; gap:8px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M17 21v-2a4 2 0 0 0-4-4H5a4 2 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                        <path d="M23 21v-2a4 2 0 0 0-3-3.87"></path>
+                                        <path d="M16 3.13a4 2 0 0 1 0 7.75"></path>
+                                    </svg>
+                                    User Setup
+                                </span>
+                                <button id="user-setup-edit-btn" class="btn btn-sm btn-outline" style="padding:2px 12px; font-size:0.78rem; display:none;" onclick="toggleUserSetupEdit()">Edit</button>
                             </h4>
-                            <div
-                                style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
-                                <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
-                                <input type="number" id="wizard-user-count" class="user-count-input" value="1" min="1"
-                                    max="20" onchange="generateWizardUserInputs()">
-                            </div>
-                            <div id="wizard-user-names" class="custom-scroll"
-                                style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
-                                <!-- User inputs -->
+                            <!-- Wrapper locked when project ZIP is loaded -->
+                            <div id="user-setup-fields">
+                                <div style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
+                                    <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
+                                    <input type="number" id="wizard-user-count" class="user-count-input" value="1" min="1"
+                                        max="20" onchange="generateWizardUserInputs()">
+                                </div>
+                                <div id="wizard-user-names" class="custom-scroll"
+                                    style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
+                                    <!-- User inputs -->
+                                </div>
                             </div>
                         </div>
                     </div>

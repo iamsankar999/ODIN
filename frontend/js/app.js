@@ -556,70 +556,71 @@ async function handleProjectZipUpload(input) {
 
 
 /**
- * OPEN PROJECT — USER INFO PANEL
- * Shows restored user info after loading a project ZIP, with edit option.
+ * OPEN PROJECT — USER INFO in existing User Setup panel
+ * Populates wizard-user-count and wizard-user-names with restored users,
+ * locks the fields (read-only), and shows the Edit button.
  */
 function showOpenProjectUserInfo() {
-    const panel = document.getElementById('open-project-user-info');
-    const display = document.getElementById('open-project-user-display');
-    const editDiv = document.getElementById('open-project-user-edit');
-    if (!panel || !display) return;
+    if (allUsers.length === 0) return;
 
-    // Reset edit state
-    if (editDiv) editDiv.style.display = 'none';
+    // Populate the existing User Setup inputs
+    const countInput = document.getElementById('wizard-user-count');
+    if (countInput) countInput.value = allUsers.length;
+    generateWizardUserInputs();
 
-    if (allUsers.length === 0) {
-        panel.style.display = 'none';
-        return;
-    }
+    // Fill names into the generated inputs
+    const nameInputs = document.querySelectorAll('#wizard-user-names .user-name-input');
+    nameInputs.forEach((inp, i) => { inp.value = allUsers[i] || ''; });
 
-    // Show read-only summary
-    display.innerHTML = `<strong>${allUsers.length} user${allUsers.length > 1 ? 's' : ''}:</strong> ${allUsers.map(u => `<span style="background:rgba(99,102,241,0.2);border-radius:4px;padding:1px 7px;margin:2px;">${u}</span>`).join(' ')}`;
-    panel.style.display = 'block';
+    // Lock the User Setup panel (read-only)
+    setUserSetupLocked(true);
 
-    // Pre-fill edit inputs
-    const countInput = document.getElementById('open-project-user-count');
-    if (countInput) {
-        countInput.value = allUsers.length;
-        regenerateOpenProjectUserInputs();
-    }
+    // Show Edit button
+    const editBtn = document.getElementById('user-setup-edit-btn');
+    if (editBtn) editBtn.style.display = 'inline-flex';
 }
 
-function toggleOpenProjectUserEdit() {
-    const editDiv = document.getElementById('open-project-user-edit');
-    if (!editDiv) return;
-    editDiv.style.display = editDiv.style.display === 'none' ? 'block' : 'none';
-}
-
-function regenerateOpenProjectUserInputs() {
-    const countInput = document.getElementById('open-project-user-count');
-    const container = document.getElementById('open-project-user-names');
-    if (!countInput || !container) return;
-    const count = parseInt(countInput.value) || 1;
-    const existingNames = allUsers.slice();
-    container.innerHTML = '';
-    for (let i = 0; i < count; i++) {
-        const inp = document.createElement('input');
-        inp.type = 'text';
-        inp.className = 'user-name-input';
-        inp.placeholder = `User ${i + 1} Name`;
-        inp.style.cssText = 'width:100%; padding:5px 8px; border-radius:5px; border:1px solid rgba(148,163,184,0.3); background:rgba(15,23,42,0.6); color:#e2e8f0; font-size:0.83rem;';
-        inp.value = existingNames[i] || '';
-        container.appendChild(inp);
+function setUserSetupLocked(locked) {
+    const wrapper = document.getElementById('user-setup-fields');
+    if (!wrapper) return;
+    if (locked) {
+        wrapper.style.opacity = '0.7';
+        wrapper.style.pointerEvents = 'none';
+        wrapper.style.userSelect = 'none';
+    } else {
+        wrapper.style.opacity = '1';
+        wrapper.style.pointerEvents = '';
+        wrapper.style.userSelect = '';
     }
 }
 
-function applyOpenProjectUserEdit() {
-    const inputs = document.querySelectorAll('#open-project-user-names input');
-    const names = Array.from(inputs).map(i => i.value.trim()).filter(v => v !== '');
-    if (names.length === 0) { alert('Please enter at least one user name.'); return; }
-    allUsers = names;
-    // Re-assign places to users
-    allUnmatchedPlaces.forEach((place, idx) => { place.assigned_user = allUsers[idx % allUsers.length]; });
-    showOpenProjectUserInfo();
-    checkWizardCompletion();
-    console.log('User list updated:', allUsers);
+function toggleUserSetupEdit() {
+    const wrapper = document.getElementById('user-setup-fields');
+    const editBtn = document.getElementById('user-setup-edit-btn');
+    if (!wrapper) return;
+    const isLocked = wrapper.style.pointerEvents === 'none';
+    if (isLocked) {
+        // Unlock for editing
+        setUserSetupLocked(false);
+        if (editBtn) editBtn.textContent = 'Apply';
+    } else {
+        // Apply changes and re-lock
+        const nameInputs = document.querySelectorAll('#wizard-user-names .user-name-input');
+        const names = Array.from(nameInputs).map(i => i.value.trim()).filter(v => v !== '');
+        if (names.length === 0) { alert('Please enter at least one user name.'); return; }
+        allUsers = names;
+        allUnmatchedPlaces.forEach((place, idx) => { place.assigned_user = allUsers[idx % allUsers.length]; });
+        setUserSetupLocked(true);
+        if (editBtn) editBtn.textContent = 'Edit';
+        checkWizardCompletion();
+        console.log('User list updated:', allUsers);
+    }
 }
+
+// Keep old function names as stubs for any residual references
+function toggleOpenProjectUserEdit() { toggleUserSetupEdit(); }
+function regenerateOpenProjectUserInputs() { generateWizardUserInputs(); }
+function applyOpenProjectUserEdit() { toggleUserSetupEdit(); }
 
 /**
  * AUTO-SAVE logic:
