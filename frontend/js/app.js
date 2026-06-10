@@ -541,6 +541,7 @@ async function handleProjectZipUpload(input) {
         }
         
         projectZipParsed = true;
+        showOpenProjectUserInfo();
         checkWizardCompletion();
     } catch (err) {
         console.error("ZIP load failed:", err);
@@ -551,6 +552,73 @@ async function handleProjectZipUpload(input) {
         }
         alert("Failed to parse project bundle: " + err.message);
     }
+}
+
+
+/**
+ * OPEN PROJECT — USER INFO PANEL
+ * Shows restored user info after loading a project ZIP, with edit option.
+ */
+function showOpenProjectUserInfo() {
+    const panel = document.getElementById('open-project-user-info');
+    const display = document.getElementById('open-project-user-display');
+    const editDiv = document.getElementById('open-project-user-edit');
+    if (!panel || !display) return;
+
+    // Reset edit state
+    if (editDiv) editDiv.style.display = 'none';
+
+    if (allUsers.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Show read-only summary
+    display.innerHTML = `<strong>${allUsers.length} user${allUsers.length > 1 ? 's' : ''}:</strong> ${allUsers.map(u => `<span style="background:rgba(99,102,241,0.2);border-radius:4px;padding:1px 7px;margin:2px;">${u}</span>`).join(' ')}`;
+    panel.style.display = 'block';
+
+    // Pre-fill edit inputs
+    const countInput = document.getElementById('open-project-user-count');
+    if (countInput) {
+        countInput.value = allUsers.length;
+        regenerateOpenProjectUserInputs();
+    }
+}
+
+function toggleOpenProjectUserEdit() {
+    const editDiv = document.getElementById('open-project-user-edit');
+    if (!editDiv) return;
+    editDiv.style.display = editDiv.style.display === 'none' ? 'block' : 'none';
+}
+
+function regenerateOpenProjectUserInputs() {
+    const countInput = document.getElementById('open-project-user-count');
+    const container = document.getElementById('open-project-user-names');
+    if (!countInput || !container) return;
+    const count = parseInt(countInput.value) || 1;
+    const existingNames = allUsers.slice();
+    container.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'user-name-input';
+        inp.placeholder = `User ${i + 1} Name`;
+        inp.style.cssText = 'width:100%; padding:5px 8px; border-radius:5px; border:1px solid rgba(148,163,184,0.3); background:rgba(15,23,42,0.6); color:#e2e8f0; font-size:0.83rem;';
+        inp.value = existingNames[i] || '';
+        container.appendChild(inp);
+    }
+}
+
+function applyOpenProjectUserEdit() {
+    const inputs = document.querySelectorAll('#open-project-user-names input');
+    const names = Array.from(inputs).map(i => i.value.trim()).filter(v => v !== '');
+    if (names.length === 0) { alert('Please enter at least one user name.'); return; }
+    allUsers = names;
+    // Re-assign places to users
+    allUnmatchedPlaces.forEach((place, idx) => { place.assigned_user = allUsers[idx % allUsers.length]; });
+    showOpenProjectUserInfo();
+    checkWizardCompletion();
+    console.log('User list updated:', allUsers);
 }
 
 /**
@@ -581,6 +649,7 @@ async function performAutoSave() {
     zip.file("plaza_mapping.json", JSON.stringify(plazaMapping));
     zip.file("project_config.json", JSON.stringify({ 
         mode: currentMode,
+        users: allUsers,
         comm_abstract: COMMODITIES_ABSTRACT,
         comm_detailed: COMMODITIES_DETAILED
     }));
@@ -634,6 +703,10 @@ async function parseProjectZip(file) {
         }
         if (cfg.comm_abstract) COMMODITIES_ABSTRACT = cfg.comm_abstract;
         if (cfg.comm_detailed) COMMODITIES_DETAILED = cfg.comm_detailed;
+        if (cfg.users && Array.isArray(cfg.users) && cfg.users.length > 0) {
+            allUsers = cfg.users;
+            console.log("Restored users:", allUsers);
+        }
     }
 
     // 2. Load and Upload OD Dataset (Smart search)
