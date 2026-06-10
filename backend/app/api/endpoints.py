@@ -263,6 +263,25 @@ def get_zone(lat: float, lng: float):
     except Exception as e:
         return {"zone": None, "error": str(e)}
 
+
+@router.get("/shapefile/geojson")
+def get_shapefile_geojson():
+    """
+    Returns the currently loaded shapefile (global_gdf) as a standard GeoJSON
+    FeatureCollection so the frontend can overlay it on the map.
+    """
+    global global_gdf
+    if global_gdf is None:
+        raise HTTPException(status_code=404, detail="No shapefile loaded")
+    try:
+        # Ensure geographic CRS
+        gdf = global_gdf
+        if gdf.crs and gdf.crs.to_epsg() != 4326:
+            gdf = gdf.to_crs(epsg=4326)
+        return json.loads(gdf.to_json())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to serialise shapefile: {str(e)}")
+
 from fastapi import Form
 from fastapi.responses import Response
 import json
@@ -301,9 +320,11 @@ async def export_progress(
     mapping: str = Form(...),
     excel_file: UploadFile = File(None),
     shapefile_zip: UploadFile = File(None),
-    plaza_mapping: Optional[str] = Form(None)
+    plaza_mapping: Optional[str] = Form(None),
+    mode: Optional[str] = Form(None)
 ):
     try:
+        from app.core.exporter import update_zones_with_shapefile
         mapping_dict = json.loads(mapping)
         plaza_mapping_dict = json.loads(plaza_mapping) if plaza_mapping else {}
         
@@ -316,7 +337,15 @@ async def export_progress(
         if shapefile_zip is not None:
             shape_bytes = await shapefile_zip.read()
             gdf = process_shapefile_zip(shape_bytes)
-            
+            if gdf.crs and not gdf.crs.is_geographic:
+                gdf = gdf.to_crs(epsg=4326)
+
+        # ── Place assign: re-zone all resolved places using the newly uploaded shapefile ──
+        if mode == "Place assign" and gdf is not None:
+            mapping_dict = update_zones_with_shapefile(mapping_dict, gdf)
+            # Re-serialise the updated mapping so resolutions.json in the ZIP is also updated
+            mapping = json.dumps(mapping_dict)
+
         # 1. Generate Resolved Places Excel
         resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes)
         
@@ -336,7 +365,7 @@ async def export_progress(
             if shape_bytes:
                 zip_file.writestr("Shapefile_Original.zip", shape_bytes)
 
-            # 4. Add Metadata for Re-opening
+            # 4. Add Metadata for Re-opening (use updated mapping)
             zip_file.writestr("resolutions.json", mapping)
             if plaza_mapping:
                 zip_file.writestr("plaza_mapping.json", plaza_mapping)
@@ -675,11 +704,6 @@ echo.
 echo  Update applied successfully!
 echo  Restarting ODIN...
 echo.
-
-:: Kill any lingering ODIN console windows (matched by window title)
-:: so only the freshly launched terminal remains.
-taskkill /fi "WINDOWTITLE eq ODIN - OD Validation System" /f >nul 2>&1
-timeout /t 1 /nobreak >nul
 
 :: Relaunch ODIN with --no-browser flag (existing browser tab will auto-reload)
 start "" "ODIN_Launch.bat" --no-browser

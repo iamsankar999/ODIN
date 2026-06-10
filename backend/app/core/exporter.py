@@ -376,3 +376,77 @@ def generate_rv_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDa
             df.to_excel(writer, sheet_name=sheet_name, index=False)
             
     return output.getvalue()
+
+
+def update_zones_with_shapefile(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
+    """
+    Place Assign mode: For every resolved entry in the mapping, perform a
+    Point-in-Polygon lookup against the NEW shapefile and overwrite the 'zone'
+    field in-place.  Returns the updated mapping dict.
+    """
+    import copy
+    if not mapping or shapefile_gdf is None:
+        return mapping
+
+    # Ensure geographic CRS
+    if shapefile_gdf.crs and shapefile_gdf.crs.to_epsg() != 4326:
+        shapefile_gdf = shapefile_gdf.to_crs(epsg=4326)
+
+    # Identify the zone identifier column
+    zone_col = None
+    cols_upper = {c.upper(): c for c in shapefile_gdf.columns}
+    for candidate in ['ZONENUMBER', 'ZONENUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']:
+        if candidate in cols_upper:
+            zone_col = cols_upper[candidate]
+            break
+
+    # Collect all (orig_name, p_key, res_data, point) tuples that have coordinates
+    point_records = []
+    for orig_name, res_entry in mapping.items():
+        if isinstance(res_entry, dict) and any(isinstance(v, dict) for v in res_entry.values()):
+            for p_key, res_data in res_entry.items():
+                if isinstance(res_data, dict):
+                    lat, lng = res_data.get('lat'), res_data.get('lng')
+                    if lat is not None and lng is not None:
+                        point_records.append({'orig': orig_name, 'p_key': p_key, 'geometry': Point(float(lng), float(lat))})
+        else:
+            lat, lng = res_entry.get('lat'), res_entry.get('lng')
+            if lat is not None and lng is not None:
+                point_records.append({'orig': orig_name, 'p_key': None, 'geometry': Point(float(lng), float(lat))})
+
+    if not point_records:
+        return mapping
+
+    points_gdf = gpd.GeoDataFrame(point_records, crs='EPSG:4326')
+
+    shp_cols = ['geometry']
+    if zone_col:
+        shp_cols = [zone_col, 'geometry']
+    joined = gpd.sjoin(points_gdf, shapefile_gdf[shp_cols], how='left', predicate='within')
+
+    updated = copy.deepcopy(mapping)
+
+    for _, row in joined.iterrows():
+        orig_name = row['orig']
+        p_key = row['p_key']
+
+        zone_val = None
+        if zone_col and zone_col in joined.columns:
+            raw = row.get(zone_col)
+            if pd.notna(raw):
+                zone_val = clean_zone_export(str(raw).strip())
+
+        if zone_val is None:
+            continue  # Point outside all zones — leave existing zone unchanged
+
+        entry = updated.get(orig_name)
+        if entry is None:
+            continue
+
+        if isinstance(entry, dict) and any(isinstance(v, dict) for v in entry.values()):
+            if p_key and p_key in entry and isinstance(entry[p_key], dict):
+                entry[p_key]['zone'] = zone_val
+        else:
+            entry['zone'] = zone_val
+
+    return updated

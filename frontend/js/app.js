@@ -316,8 +316,20 @@ function switchView(viewId) {
 }
 
 function handleWizardFileUpload(input, type) {
-    if (type === 'shp') handleShapefileUpload({ target: input });
-    else handleFileUpload({ target: input });
+    if (currentMode === 'Place assign') {
+        // Place Assign: Button 1 (shp) → new shapefile zip | Button 2 (od) → Zone Assign ZIP
+        if (type === 'shp') {
+            // Upload new shapefile for re-zoning
+            handleShapefileUpload({ target: input });
+        } else {
+            // Upload previously exported Zone Assign ZIP
+            const file = input.files ? input.files[0] : null;
+            if (file) handleZoneAssignZipUpload(file);
+        }
+    } else {
+        if (type === 'shp') handleShapefileUpload({ target: input });
+        else handleFileUpload({ target: input });
+    }
 }
 
 function generateWizardUserInputs() {
@@ -372,6 +384,25 @@ function selectModeForSetup(mode) {
     currentMode = mode;
     document.getElementById('setup-subtitle').textContent = `Setup - ${mode}`;
     switchView('view-setup');
+
+    // ── Place Assign: Adapt wizard upload buttons ──
+    const shpBtn   = document.getElementById('wizard-shp-btn');
+    const odBtn    = document.getElementById('wizard-od-btn');
+    const shpInput = document.getElementById('wizard-shapefile-upload');
+    const odInput  = document.getElementById('wizard-od-upload');
+
+    if (mode === 'Place assign') {
+        // Button 1: Upload new zoning shapefile
+        if (shpBtn && shpBtn.childNodes[0]) shpBtn.childNodes[0].textContent = 'Upload New Shapefile';
+        // Button 2: Upload Zone Assign ZIP (not an Excel)
+        if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload Zone Assign ZIP';
+        if (odInput) odInput.accept = '.zip';
+    } else {
+        // Restore Zone Assign defaults
+        if (shpBtn && shpBtn.childNodes[0]) shpBtn.childNodes[0].textContent = 'Upload Shapefile';
+        if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload OD Dataset';
+        if (odInput) odInput.accept = '.csv,.xlsx';
+    }
 }
 
 function switchSetupTab(tab) {
@@ -1190,6 +1221,7 @@ async function downloadProgress() {
 
     const formData = new FormData();
     formData.append('mapping', JSON.stringify(resolvedPlaces));
+    formData.append('mode', currentMode); // Tells backend whether to re-zone (Place assign)
 
     if (projectOdBlob) {
         formData.append('excel_file', projectOdBlob);
@@ -1294,6 +1326,11 @@ function selectMode(mode) {
         if (reviewContainer) reviewContainer.style.display = '';
         if (manualSelectCard) manualSelectCard.style.display = '';
         if (manualSearchCard) manualSearchCard.style.display = '';
+
+        // ── Place Assign: render all resolved places + plazas over the new shapefile ──
+        if (mode === 'Place assign') {
+            renderPlaceAssignInitialMap();
+        }
     }
 
     // Update active class in menu
@@ -1311,6 +1348,200 @@ function selectMode(mode) {
     allUnmatchedPlaces.forEach(p => { p.suggestions = []; });
     filterPlacesByUser();
     if (unmatchedPlaces.length > 0) renderCurrentPlace();
+}
+
+// ── Place Assign helpers ─────────────────────────────────────────────────────
+
+/**
+ * Parses an exported Zone Assign ZIP bundle for use in Place Assign mode.
+ * Extracts the ODIN_Resolved_OD_Dataset.xlsx (uploaded as OD input) and
+ * stashes resolutions.json / plaza_mapping.json into app state.
+ */
+async function handleZoneAssignZipUpload(file) {
+    if (typeof JSZip === 'undefined') { alert('JSZip not loaded.'); return; }
+
+    const odBtn = document.getElementById('wizard-od-btn');
+    if (odBtn) {
+        odBtn.classList.add('loading');
+        if (odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Processing ZIP...';
+    }
+
+    try {
+        const zip = await JSZip.loadAsync(file);
+
+        // 1. Restore resolutions
+        const resFile = zip.file('resolutions.json');
+        if (resFile) {
+            resolvedPlaces = JSON.parse(await resFile.async('string'));
+        }
+
+        // 2. Restore plaza mapping
+        const pzFile = zip.file('plaza_mapping.json');
+        if (pzFile) {
+            plazaMapping = JSON.parse(await pzFile.async('string'));
+            plazaMappingConfirmed = Object.keys(plazaMapping).length > 0;
+        }
+
+        // 3. Find and upload the Excel dataset
+        let odFile = zip.file('ODIN_Resolved_OD_Dataset.xlsx') || zip.file('od_dataset.xlsx');
+        if (!odFile) {
+            const candidates = Object.keys(zip.files).filter(n => n.endsWith('.xlsx'));
+            if (candidates.length > 0) odFile = zip.file(candidates[0]);
+        }
+        if (!odFile) throw new Error('No Excel dataset found in ZIP.');
+
+        const odBlob = await odFile.async('blob');
+        projectOdBlob = odBlob;
+        currentUploadedFile = odBlob;
+        // Upload as Excel to backend (processes OD pairs into allUnmatchedPlaces)
+        await handleFileUpload(odBlob, true);
+
+        if (odBtn) {
+            odBtn.classList.remove('loading', 'not-loaded');
+            odBtn.classList.add('loaded');
+            if (odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Zone Assign ZIP Loaded ✓';
+        }
+
+        filesUploaded.od = true;
+        checkWizardCompletion();
+    } catch (err) {
+        console.error('Zone Assign ZIP parse failed:', err);
+        if (odBtn) {
+            odBtn.classList.remove('loading');
+            if (odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload Zone Assign ZIP';
+        }
+        alert('Failed to load Zone Assign ZIP: ' + err.message);
+    }
+}
+
+/**
+ * Place Assign initial map:
+ * - Fetches the newly uploaded shapefile as GeoJSON and overlays it.
+ * - Plots all resolved places as small red circles.
+ * - Plots all survey plazas as small blue circles.
+ */
+async function renderPlaceAssignInitialMap() {
+    if (!map) return;
+
+    // Clear existing markers / lines / overlays
+    markers.forEach(m => m.setMap(null));
+    markers = [];
+    lines.forEach(l => { if (l.line) l.line.setMap(null); });
+    lines = [];
+    if (map.data) map.data.forEach(f => map.data.remove(f));
+    if (activeInfoWindow) { activeInfoWindow.close(); activeInfoWindow = null; }
+
+    const bounds = new google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    // 1. Fetch shapefile GeoJSON overlay
+    try {
+        const resp = await fetch('http://localhost:8000/api/shapefile/geojson');
+        if (resp.ok) {
+            const geojson = await resp.json();
+            map.data.addGeoJson(geojson);
+            map.data.setStyle({
+                fillColor: '#4285F4',
+                fillOpacity: 0.07,
+                strokeColor: '#4285F4',
+                strokeWeight: 1.5,
+                clickable: false
+            });
+            // Extend bounds to cover the shapefile
+            const tempLayer = new google.maps.Data();
+            tempLayer.addGeoJson(geojson);
+            tempLayer.forEach(f => {
+                f.getGeometry().forEachLatLng(ll => { bounds.extend(ll); hasPoints = true; });
+            });
+        }
+    } catch (e) {
+        console.warn('Could not fetch shapefile GeoJSON for Place Assign map:', e);
+    }
+
+    // 2. Red circles: all unique resolved places
+    const plotted = new Set();
+    for (const [origName, resEntry] of Object.entries(resolvedPlaces)) {
+        const targets = [];
+        if (typeof resEntry === 'object' && resEntry !== null && Object.values(resEntry).some(v => typeof v === 'object' && v !== null && 'lat' in v)) {
+            for (const [, rd] of Object.entries(resEntry)) {
+                if (typeof rd === 'object' && rd !== null && rd.lat && rd.lng) targets.push(rd);
+            }
+        } else if (resEntry && resEntry.lat && resEntry.lng) {
+            targets.push(resEntry);
+        }
+
+        for (const rd of targets) {
+            const key = `${rd.lat.toFixed(6)},${rd.lng.toFixed(6)}`;
+            if (plotted.has(key)) continue;
+            plotted.add(key);
+
+            const pos = { lat: parseFloat(rd.lat), lng: parseFloat(rd.lng) };
+            const m = new google.maps.Marker({
+                position: pos,
+                map: map,
+                title: `${origName}\n${rd.name || ''}`,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 5,
+                    fillColor: '#EF4444',
+                    fillOpacity: 0.9,
+                    strokeColor: '#991B1B',
+                    strokeWeight: 1
+                },
+                zIndex: 10
+            });
+            const iw = new google.maps.InfoWindow({
+                content: `<div style="color:#000;min-width:140px;"><b>${origName}</b><br><span style="color:#555;font-size:11px;">${rd.name || ''}</span></div>`
+            });
+            m.addListener('click', () => {
+                if (activeInfoWindow) activeInfoWindow.close();
+                iw.open(map, m);
+                activeInfoWindow = iw;
+            });
+            markers.push(m);
+            bounds.extend(pos);
+            hasPoints = true;
+        }
+    }
+
+    // 3. Blue circles: survey plazas from plazaMapping
+    for (const [plazaName, pos] of Object.entries(plazaMapping)) {
+        if (!pos || !pos.lat || !pos.lng) continue;
+        const p = { lat: parseFloat(pos.lat), lng: parseFloat(pos.lng) };
+        const m = new google.maps.Marker({
+            position: p,
+            map: map,
+            title: plazaName,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: 6,
+                fillColor: '#3B82F6',
+                fillOpacity: 0.9,
+                strokeColor: '#1E40AF',
+                strokeWeight: 1.5
+            },
+            zIndex: 20
+        });
+        const iw = new google.maps.InfoWindow({
+            content: `<div style="color:#000;min-width:130px;"><b>Survey: ${plazaName}</b><br><span style="font-size:11px;color:#2563eb;">Survey Location</span></div>`
+        });
+        m.addListener('click', () => {
+            if (activeInfoWindow) activeInfoWindow.close();
+            iw.open(map, m);
+            activeInfoWindow = iw;
+        });
+        markers.push(m);
+        bounds.extend(p);
+        hasPoints = true;
+    }
+
+    if (hasPoints && !bounds.isEmpty()) {
+        map.fitBounds(bounds);
+        const listener = google.maps.event.addListener(map, 'idle', () => {
+            if (map.getZoom() > 12) map.setZoom(12);
+            google.maps.event.removeListener(listener);
+        });
+    }
 }
 
 /**
