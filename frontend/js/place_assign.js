@@ -902,10 +902,8 @@ async function paDownloadProgress() {
 
     // Add project configuration
     formData.append('project_config', JSON.stringify({ 
-        mode: currentMode,
-        users: pa_allUsers,
-        comm_abstract: pa_COMMODITIES_ABSTRACT,
-        comm_detailed: pa_COMMODITIES_DETAILED
+        mode: pa_currentMode,
+        users: pa_allUsers
     }));
     try {
         const resp = await fetch('/api/export/pa_progress', { method: 'POST', body: formData });
