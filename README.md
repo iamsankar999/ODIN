@@ -2,7 +2,7 @@
 
 **ODIN** is a professional-grade geospatial validation and analytical platform designed to automate the complex process of Origin-Destination (OD) data coding. It transforms raw, manually-surveyed place names into validated, geocoded, and zone-mapped datasets.
 
-![Version](https://img.shields.io/badge/version-v2.5.8-blue.svg)
+![Version](https://img.shields.io/badge/version-v2.5.9.1-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-green.svg)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet.js-orange.svg)
@@ -135,6 +135,23 @@ The system parses multiple sheets from the uploaded Excel:
 3. **Resolution**: User validates locations using map-based suggestions.
 4. **Analytics**: The R&V mode flags trips that are intrazonal or spatially illogical.
 5. **Output**: A formatted Excel report and a `.zip` project file for future sessions.
+
+---
+
+## 📋 Changelog
+
+### v2.5.9.1 — 2026-07-02 (Patch)
+- **Fix**: Resolved `ReferenceError: pa_COMMODITIES_ABSTRACT is not defined` crash that prevented exports in **Place Assign** mode.
+- **Fix**: Corrected `currentMode` → `pa_currentMode` reference in `paDownloadProgress`.
+
+### v2.5.9 — 2026-07-02
+- **Feature**: Exported ZIP now fully re-uploadable as a project — includes `project_config.json`, `resolutions.json`, and `plaza_mapping.json` for both Zone Assign and Place Assign modes.
+- **Fix**: Exported Excel now contains all original sheets: `Auto_OD_input` (with appended data), `CA_code_ABSTRACT`, `CA_code_DETAILED`, and `Resolved_Places`.
+- **Fix**: Resolved `ReferenceError: projectShpBlob is not defined` crash blocking Zone Assign exports.
+- **Fix**: Survey Location Mapping now correctly shows **Missing** for unmapped new locations after data append (was incorrectly showing "Mapped ✓").
+- **Fix**: Preliminary analysis after data append now shows statistics for the **newly appended data only**, not the entire merged dataset.
+- **Fix**: `generate_survey_locations_excel` import error that caused silent backend failure during Zone Assign exports.
+- **Fix**: Append workflow now exclusively reads the `Auto_OD_input` sheet, ignoring all other sheets to prevent crashes.
 
 ---
 
