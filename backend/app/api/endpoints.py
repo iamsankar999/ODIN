@@ -56,7 +56,7 @@ def get_suggestions(
             try:
                 # 1. Identify the likely ID column case-insensitively
                 id_col = None
-                potential_names = ['ZONENUMBER', 'ZONENUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']
+                potential_names = ['ZONENUMBER', 'ZONENUM', 'ZONE_NUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']
                 
                 # Check actual columns case-insensitively
                 cols_upper = {c.upper(): c for c in global_gdf.columns}
@@ -208,6 +208,124 @@ async def upload_excel(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
+import uuid
+TEMP_EXCEL_STORE = {}
+
+@router.post("/upload/append_excel/process")
+async def append_excel(
+    base_excel: UploadFile = File(...),
+    new_excel: UploadFile = File(...),
+    mode: Optional[str] = Form(None)
+):
+    try:
+        import pandas as pd
+        from io import BytesIO
+        import math
+        import numpy as np
+
+        base_bytes = await base_excel.read()
+        new_bytes = await new_excel.read()
+        
+        base_xl = pd.ExcelFile(BytesIO(base_bytes))
+        new_xl = pd.ExcelFile(BytesIO(new_bytes))
+        
+        if "Auto_OD_input" not in base_xl.sheet_names:
+            raise ValueError("Base project file must have 'Auto_OD_input' sheet.")
+        if "Auto_OD_input" not in new_xl.sheet_names:
+            raise ValueError("Appended file must have 'Auto_OD_input' sheet.")
+            
+        base_df = base_xl.parse("Auto_OD_input")
+        new_df = new_xl.parse("Auto_OD_input")
+        
+        # Concatenate - only Auto_OD_input data
+        merged_df = pd.concat([base_df, new_df], ignore_index=True)
+        
+        # Build merged output: only Auto_OD_input + CA code reference sheets from base
+        CA_SHEETS = ["CA_code_ABSTRACT", "CA_code_DETAILED", "CA_code", "OD_code"]
+        merged_output = BytesIO()
+        with pd.ExcelWriter(merged_output, engine='openpyxl') as writer:
+            merged_df.to_excel(writer, sheet_name='Auto_OD_input', index=False)
+            for sheet in CA_SHEETS:
+                if sheet in base_xl.sheet_names:
+                    try:
+                        base_xl.parse(sheet).to_excel(writer, sheet_name=sheet, index=False)
+                    except: pass
+                     
+        merged_bytes = merged_output.getvalue()
+        file_id = str(uuid.uuid4())
+        TEMP_EXCEL_STORE[file_id] = merged_bytes
+        
+        # Parse the ENTIRE merged dataset so analytics are globally updated
+        parsed_merged = parse_excel_data(merged_bytes, mode=mode)
+        processed_merged = process_od_data(
+            parsed_merged["main_data"],
+            parsed_merged.get("ca_codes_abstract", []),
+            od_codes=parsed_merged.get("od_codes", {})
+        )
+        
+        def clean_json(obj):
+            if isinstance(obj, list): return [clean_json(x) for x in obj]
+            if isinstance(obj, dict): return {k: clean_json(v) for k, v in obj.items()}
+            if isinstance(obj, np.bool_): return bool(obj)
+            if isinstance(obj, np.integer): return int(obj)
+            if isinstance(obj, (np.floating, float)):
+                val = float(obj)
+                if math.isnan(val) or math.isinf(val): return None
+                return val
+            if obj is None: return None
+            try:
+                import pandas as pd
+                if pd.isna(obj): return None
+            except: pass
+            return obj
+
+        # Calculate preliminary analysis for NEW DATA only
+        preliminary_analysis = {}
+        if not new_df.empty:
+            rename_dict = {}
+            for col in new_df.columns:
+                stripped_col = str(col).strip().upper()
+                if stripped_col in ['PLAZA_NAME', 'DIRECTION', 'MAV_SPLIT'] and col != stripped_col:
+                    rename_dict[col] = stripped_col
+            new_df_renamed = new_df.rename(columns=rename_dict)
+            
+            if 'PLAZA_NAME' in new_df_renamed.columns and 'DIRECTION' in new_df_renamed.columns and 'MAV_SPLIT' in new_df_renamed.columns:
+                grouped = new_df_renamed.groupby(['PLAZA_NAME', 'DIRECTION', 'MAV_SPLIT']).size().reset_index(name='count')
+                for _, row in grouped.iterrows():
+                    plaza = str(row['PLAZA_NAME']).strip()
+                    direction = str(row['DIRECTION']).strip()
+                    mav = str(row['MAV_SPLIT']).strip()
+                    count = int(row['count'])
+                    
+                    if not plaza or plaza.upper() == 'NAN': continue
+                    if not direction or direction.upper() == 'NAN': direction = "Unknown"
+                    if not mav or mav.upper() == 'NAN': continue
+                    
+                    if plaza not in preliminary_analysis:
+                        preliminary_analysis[plaza] = {}
+                    if direction not in preliminary_analysis[plaza]:
+                        preliminary_analysis[plaza][direction] = {}
+                    preliminary_analysis[plaza][direction][mav] = count
+
+        return clean_json({
+            "message": "Files merged successfully",
+            "temp_id": file_id,
+            "data": processed_merged,
+            "preliminary_analysis": preliminary_analysis
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error appending files: {str(e)}")
+
+@router.get("/download/temp_excel/{file_id}")
+async def download_temp_excel(file_id: str):
+    if file_id not in TEMP_EXCEL_STORE:
+        raise HTTPException(status_code=404, detail="Merged file not found or expired.")
+    return Response(
+        content=TEMP_EXCEL_STORE[file_id],
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=od_dataset.xlsx"}
+    )
+
 @router.post("/upload/shapefile")
 async def upload_shapefile(file: UploadFile = File(...)):
     global global_gdf
@@ -245,8 +363,7 @@ def get_zone(lat: float, lng: float):
         for idx, row in global_gdf.iterrows():
             if row['geometry'].contains(point):
                 # Try to find a reasonable identifier column 
-                zone_val = None
-                potential_names = ['ZONENUMBER', 'ZONENUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']
+                potential_names = ['ZONENUMBER', 'ZONENUM', 'ZONE_NUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']
                 cols_upper = {c.upper(): c for c in global_gdf.columns}
                 for p in potential_names:
                     if p in cols_upper:
@@ -313,7 +430,7 @@ async def export_excel(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
-from app.core.exporter import generate_progress_excel
+from app.core.exporter import generate_progress_excel, generate_survey_locations_excel
 
 @router.post("/export/progress")
 async def export_progress(
@@ -321,6 +438,7 @@ async def export_progress(
     excel_file: UploadFile = File(None),
     shapefile_zip: UploadFile = File(None),
     plaza_mapping: Optional[str] = Form(None),
+    project_config: Optional[str] = Form(None),
     mode: Optional[str] = Form(None)
 ):
     try:
@@ -340,11 +458,7 @@ async def export_progress(
             if gdf.crs and not gdf.crs.is_geographic:
                 gdf = gdf.to_crs(epsg=4326)
 
-        # ── Place assign: re-zone all resolved places using the newly uploaded shapefile ──
-        if mode == "Place assign" and gdf is not None:
-            mapping_dict = update_zones_with_shapefile(mapping_dict, gdf)
-            # Re-serialise the updated mapping so resolutions.json in the ZIP is also updated
-            mapping = json.dumps(mapping_dict)
+        # Removed Place assign logic for Zone Assign export
 
         # 1. Generate Resolved Places Excel
         resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes)
@@ -369,6 +483,8 @@ async def export_progress(
             zip_file.writestr("resolutions.json", mapping)
             if plaza_mapping:
                 zip_file.writestr("plaza_mapping.json", plaza_mapping)
+            if project_config:
+                zip_file.writestr("project_config.json", project_config)
                 
         zip_buffer.seek(0)
         
@@ -379,6 +495,73 @@ async def export_progress(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Progress export failed: {str(e)}")
+
+@router.post("/export/pa_progress")
+async def export_pa_progress(
+    mapping: str = Form(...),
+    excel_file: UploadFile = File(None),
+    shapefile_zip: UploadFile = File(None),
+    geojson_file: UploadFile = File(None),
+    plaza_mapping: Optional[str] = Form(None),
+    project_config: Optional[str] = Form(None)
+):
+    try:
+        from app.core.exporter import update_zones_with_shapefile, generate_progress_excel, generate_survey_locations_excel
+        mapping_dict = json.loads(mapping)
+        plaza_mapping_dict = json.loads(plaza_mapping) if plaza_mapping else {}
+        
+        excel_bytes = None
+        if excel_file is not None:
+            excel_bytes = await excel_file.read()
+            
+        gdf = None
+        shape_bytes = None
+
+        # Prefer GeoJSON over shapefile for PIP in Place Assign
+        if geojson_file is not None:
+            geojson_bytes = await geojson_file.read()
+            try:
+                import geopandas as gpd
+                gdf = gpd.read_file(BytesIO(geojson_bytes))
+                if gdf.crs and not gdf.crs.is_geographic:
+                    gdf = gdf.to_crs(epsg=4326)
+            except Exception as e:
+                print(f"GeoJSON parse failed: {e}")
+
+        if gdf is None and shapefile_zip is not None:
+            shape_bytes = await shapefile_zip.read()
+            gdf = process_shapefile_zip(shape_bytes)
+            if gdf.crs and not gdf.crs.is_geographic:
+                gdf = gdf.to_crs(epsg=4326)
+
+        # Place assign: re-zone all resolved places using PIP
+        if gdf is not None:
+            mapping_dict = update_zones_with_shapefile(mapping_dict, gdf)
+            mapping = json.dumps(mapping_dict)
+
+        # include_zone=True so Zone Number column appears in Place Assign Resolved_Places
+        resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes, include_zone=True)
+        survey_xlsx = generate_survey_locations_excel(plaza_mapping_dict)
+        
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr("ODIN_Resolved_OD_Dataset.xlsx", resolved_xlsx)
+            zip_file.writestr("ODIN_Survey_Location_Mapping.xlsx", survey_xlsx)
+            if shape_bytes:
+                zip_file.writestr("Shapefile_Original.zip", shape_bytes)
+            zip_file.writestr("resolutions.json", mapping)
+            if plaza_mapping:
+                zip_file.writestr("plaza_mapping.json", plaza_mapping)
+                
+        zip_buffer.seek(0)
+        
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=ODIN_PA_Export_Project.zip"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Place Assign export failed: {str(e)}")
 
 from app.core.exporter import generate_rv_progress_excel
 

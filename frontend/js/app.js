@@ -23,8 +23,8 @@ let plazaVerificationMarkers = {}; // Track green markers for map-picked survey 
 let currentSetupTab = 'new'; // 'new' or 'open'
 let projectZipFile = null;
 let projectZipParsed = false;
-let projectShpBlob = null;
 let projectOdBlob = null;
+let projectShpBlob = null;
 let autoSaveHandle = null;
 let autoSaveTimer = null;
 
@@ -316,20 +316,7 @@ function switchView(viewId) {
 }
 
 function handleWizardFileUpload(input, type) {
-    if (currentMode === 'Place assign') {
-        // Place Assign: Button 1 (shp) → new shapefile zip | Button 2 (od) → Zone Assign ZIP
-        if (type === 'shp') {
-            // Upload new shapefile for re-zoning
-            handleShapefileUpload({ target: input });
-        } else {
-            // Upload previously exported Zone Assign ZIP
-            const file = input.files ? input.files[0] : null;
-            if (file) handleZoneAssignZipUpload(file);
-        }
-    } else {
-        if (type === 'shp') handleShapefileUpload({ target: input });
-        else handleFileUpload({ target: input });
-    }
+    handleFileUpload({ target: input });
 }
 
 function generateWizardUserInputs() {
@@ -358,7 +345,7 @@ function generateWizardUserInputs() {
 }
 
 function checkWizardCompletion() {
-    const newProjectReady = filesUploaded.shp && filesUploaded.od;
+    const newProjectReady = filesUploaded.od;
     const openProjectReady = projectZipFile !== null && projectZipParsed === true;
     const projectReady = newProjectReady || openProjectReady;
 
@@ -543,6 +530,9 @@ async function handleProjectZipUpload(input) {
         projectZipParsed = true;
         showOpenProjectUserInfo();
         checkWizardCompletion();
+        // Reveal "Append Extra OD Data" option now that a project is loaded
+        const appendSection = document.getElementById('append-data-section');
+        if (appendSection) appendSection.style.display = 'block';
     } catch (err) {
         console.error("ZIP load failed:", err);
         if (zipBtn) {
@@ -659,9 +649,6 @@ async function performAutoSave() {
     if (projectOdBlob) {
         zip.file("od_dataset.xlsx", projectOdBlob);
     }
-    if (projectShpBlob) {
-        zip.file("shapefile.zip", projectShpBlob);
-    }
 
     const blob = await zip.generateAsync({ type: "blob" });
     const writable = await autoSaveHandle.createWritable();
@@ -696,18 +683,24 @@ async function parseProjectZip(file) {
     if (cfgFile) {
         const content = await cfgFile.async("string");
         const cfg = JSON.parse(content);
-        if (cfg.mode) {
+        // Only override mode if explicitly set AND it's a valid zone-assign mode
+        // Zone Assign is the default — only switch if config explicitly stores Place assign
+        if (cfg.mode && cfg.mode === 'Place assign') {
             currentMode = cfg.mode;
-            const modeSelector = document.getElementById('mode-selector');
-            if (modeSelector) modeSelector.value = currentMode;
-            console.log("Restored mode:", currentMode);
+        } else {
+            currentMode = 'Zone assign'; // Default mode when loading a project
         }
+        const modeSelector = document.getElementById('mode-selector');
+        if (modeSelector) modeSelector.value = currentMode;
+        console.log("Restored mode:", currentMode);
         if (cfg.comm_abstract) COMMODITIES_ABSTRACT = cfg.comm_abstract;
         if (cfg.comm_detailed) COMMODITIES_DETAILED = cfg.comm_detailed;
         if (cfg.users && Array.isArray(cfg.users) && cfg.users.length > 0) {
             allUsers = cfg.users;
             console.log("Restored users:", allUsers);
         }
+    } else {
+        currentMode = 'Zone assign'; // Default when no config present
     }
 
     // 2. Load and Upload OD Dataset (Smart search)
@@ -725,20 +718,6 @@ async function parseProjectZip(file) {
         await handleFileUpload(odBlob, true);
     } else {
         throw new Error("Invalid project bundle: Could not find an Excel (.xlsx) dataset.");
-    }
-
-    // 3. Load and Upload Shapefile (Smart search)
-    let shpFile = zip.file("shapefile.zip") || zip.file("Shapefile_Original.zip");
-    if (!shpFile) {
-        // Fallback to any other .zip file in the bundle
-        const candidates = Object.keys(zip.files).filter(name => name.endsWith('.zip') && name !== file.name);
-        if (candidates.length > 0) shpFile = zip.file(candidates[0]);
-    }
-
-    if (shpFile) {
-        const shpBlob = await shpFile.async("blob");
-        projectShpBlob = shpBlob;
-        await handleShapefileUpload(shpBlob, true);
     }
 }
 
@@ -986,75 +965,6 @@ async function fetchZoneForLocation(lat, lng) {
     }
 }
 
-async function handleShapefileUpload(event, isFromZip = false) {
-    const file = event.target ? event.target.files[0] : event;
-    if (!file) return;
-
-    const shpBtns = isFromZip ? [] : [
-        document.querySelector('label[for="shapefile-upload"]'),
-        document.getElementById('wizard-shp-btn'),
-        document.getElementById('shapefile-label')
-    ];
-
-    // Show Loading in buttons
-    shpBtns.forEach(btn => {
-        if (btn) {
-            btn.classList.add("loading");
-            if (btn.childNodes[0]) btn.childNodes[0].textContent = "Uploading Shapefile...";
-        }
-    });
-
-    const formData = new FormData();
-    if (file.name) {
-        formData.append('file', file);
-    } else {
-        formData.append('file', file, 'shapefile.zip');
-    }
-
-    try {
-        const response = await fetch('http://localhost:8000/api/upload/shapefile', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || "Server error");
-        }
-
-        const result = await response.json();
-        filesUploaded.shp = true;
-        // Stash the blob for project bundles
-        projectShpBlob = file;
-
-        // Update UI Elements to Loaded state
-        shpBtns.forEach(btn => {
-            if (btn) {
-                btn.classList.remove("loading", "not-loaded");
-                btn.classList.add("loaded");
-                if (btn.childNodes[0]) btn.childNodes[0].textContent = "Shapefile Loaded ✓";
-            }
-        });
-
-        const statusDot = document.getElementById('status-shp');
-        if (statusDot && !isFromZip) {
-            statusDot.classList.remove('status-pending');
-            statusDot.classList.add('status-check');
-            statusDot.textContent = "✓";
-        }
-
-        checkWizardCompletion();
-        checkFilesCollapsed();
-
-        // Silent success - no alert
-    } catch (error) {
-        console.error("Shapefile upload failed:", error);
-        shpBtns.forEach(btn => {
-            if (btn) btn.classList.remove("loading");
-        });
-        alert("Shapefile upload failed: " + error.message);
-    }
-}
 
 function showLoading(text) {
     const overlay = document.getElementById('loading-overlay');
@@ -1146,6 +1056,139 @@ function renderPreliminaryAnalysis(data) {
 function closePreliminaryAnalysisModal() {
     const modal = document.getElementById('preliminary-analysis-modal');
     if (modal) modal.classList.remove('active');
+}
+
+
+async function handleAppendDataUpload(input) {
+    const file = input.files ? input.files[0] : (input.target ? input.target.files[0] : input);
+    if (!file) return;
+
+    if (!projectOdBlob) {
+        alert("Cannot append data: Original OD dataset is missing from the project.");
+        return;
+    }
+
+    const btn = document.getElementById('append-od-btn');
+    if (btn) {
+        btn.classList.add('loading');
+        btn.textContent = "Merging & Processing Data...";
+    }
+
+    const formData = new FormData();
+    formData.append('base_excel', projectOdBlob, 'base_od_dataset.xlsx');
+    formData.append('new_excel', file, 'new_od_dataset.xlsx');
+
+    try {
+        const response = await fetch('/api/upload/append_excel/process', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || "Server error");
+        }
+
+        const result = await response.json();
+
+        // Download the merged excel blob and replace projectOdBlob
+        const blobResp = await fetch(`/api/download/temp_excel/${result.temp_id}`);
+        if (blobResp.ok) {
+            projectOdBlob = await blobResp.blob();
+            currentUploadedFile = projectOdBlob;
+        }
+
+        const mergedData = result.data || [];
+        let newPlacesFoundCount = 0;
+        let newSurveyLocations = false;
+
+        placeOccurrencesMap = {};
+        globalTotalOccurrences = 0;
+
+        // Process the full merged dataset
+        mergedData.forEach(p => {
+            // Update global occurrence trackers
+            placeOccurrencesMap[p.original_name] = p.total_occurrences || 0;
+            globalTotalOccurrences += (p.total_occurrences || 0);
+
+            // Check for new survey locations (plazas)
+            if (p.analytics && p.analytics.plazas && p.analytics.plazas.headers) {
+                p.analytics.plazas.headers.forEach(plaza => {
+                    if (!uniquePlazas.includes(plaza)) {
+                        uniquePlazas.push(plaza);
+                        if (!plazaMapping[plaza]) {
+                            plazaMapping[plaza] = { lat: null, lng: null };
+                            newSurveyLocations = true;
+                        }
+                    }
+                });
+            }
+
+            // Check if place is already resolved
+            if (resolvedPlaces[p.original_name]) {
+                return; // Already resolved, ignore for queue
+            }
+
+            // Check if place is already in unmatched queue
+            const existingPlace = allUnmatchedPlaces.find(ep => ep.original_name === p.original_name);
+            if (existingPlace) {
+                // Update its analytics and occurrence count with the merged data
+                existingPlace.analytics = p.analytics;
+                existingPlace.total_occurrences = p.total_occurrences;
+            } else {
+                // Completely new place
+                p.assigned_user = allUsers[allUnmatchedPlaces.length % Math.max(allUsers.length, 1)] || "All Users";
+                allUnmatchedPlaces.push(p);
+                newPlacesFoundCount++;
+            }
+        });
+
+        filterPlacesByUser();
+        updateNavigatorDisplay();
+
+        // Build the continuation action (runs after preliminary analysis or immediately)
+        const afterPreliminary = () => {
+            if (newSurveyLocations) {
+                // Open survey mapping for new locations only
+                setupSurveyLocations();
+            } else {
+                alert(`Data merged! Found ${newPlacesFoundCount} new places to resolve.`);
+                selectMode(currentMode);
+            }
+        };
+
+        const modal = document.getElementById('preliminary-analysis-modal');
+        if (result.preliminary_analysis && modal) {
+            renderPreliminaryAnalysis(result.preliminary_analysis);
+            modal.classList.add('active');
+
+            const btn = modal.querySelector('.modal-footer .btn-primary');
+            if (btn) {
+                const origText = btn.textContent;
+                btn.textContent = 'Next';
+                const handler = () => {
+                    btn.removeEventListener('click', handler);
+                    btn.onclick = null;
+                    btn.textContent = origText;
+                    closePreliminaryAnalysisModal();
+                    afterPreliminary();
+                };
+                btn.onclick = null;
+                btn.addEventListener('click', handler);
+            }
+        } else {
+            afterPreliminary();
+        }
+        triggerAutoSave();
+    } catch (error) {
+        console.error("Append upload failed:", error);
+        alert("Failed to append data: " + error.message);
+    } finally {
+        if (btn) {
+            btn.classList.remove('loading');
+            btn.innerHTML = `+ Append Extra OD Data<input type="file" id="append-od-upload" accept=".xlsx" style="display:none;" onchange="handleAppendDataUpload(this)">`;
+        }
+    }
 }
 
 async function handleFileUpload(event, isFromZip = false) {
@@ -1303,7 +1346,7 @@ async function downloadProgress() {
     formData.append('mode', currentMode); // Tells backend whether to re-zone (Place assign)
 
     if (projectOdBlob) {
-        formData.append('excel_file', projectOdBlob);
+        formData.append('excel_file', projectOdBlob, 'ODIN_Dataset.xlsx');
     }
 
     if (projectShpBlob) {
@@ -1312,11 +1355,19 @@ async function downloadProgress() {
 
     // Add survey location details
     formData.append('plaza_mapping', JSON.stringify(plazaMapping));
+    
+    // Add project configuration
+    formData.append('project_config', JSON.stringify({ 
+        mode: currentMode,
+        users: allUsers,
+        comm_abstract: COMMODITIES_ABSTRACT,
+        comm_detailed: COMMODITIES_DETAILED
+    }));
 
     showLoading("Generating Project ZIP Export...");
 
     try {
-        const response = await fetch('http://localhost:8000/api/export/progress', {
+        const response = await fetch('/api/export/progress', {
             method: 'POST',
             body: formData
         });
@@ -3180,7 +3231,8 @@ function setupSurveyLocations() {
     }
 
     document.getElementById('survey-modal').classList.add('active');
-    document.getElementById('setup-sub-dropdown').classList.add('collapsed-sub');
+    const setupDropdown = document.getElementById('setup-sub-dropdown');
+    if (setupDropdown) setupDropdown.classList.add('collapsed-sub');
     renderSurveyModal(uniquePlazas);
 }
 
@@ -3194,7 +3246,8 @@ function renderSurveyModal(plazas) {
     container.innerHTML = '';
 
     plazas.forEach(name => {
-        const isMapped = !!plazaMapping[name];
+        const mapping = plazaMapping[name];
+        const isMapped = mapping && mapping.lat !== null && mapping.lng !== null;
         const row = document.createElement('div');
         row.className = `plaza-row ${isMapped ? 'mapped' : ''}`;
         row.id = `plaza-row-${name.replace(/\s+/g, '-')}`;
@@ -3268,7 +3321,8 @@ function applyPlazaMapping() {
 
 function setupUsers() {
     document.getElementById('user-modal').classList.add('active');
-    document.getElementById('setup-sub-dropdown').classList.add('collapsed-sub');
+    const setupDropdown = document.getElementById('setup-sub-dropdown');
+    if (setupDropdown) setupDropdown.classList.add('collapsed-sub');
     generateUserNameInputs();
 }
 
@@ -3323,22 +3377,26 @@ function applyUserAssignments() {
 // BASE NUMBER PLACEHOLDERS
 function assignPlaza() {
     alert("IHMCL Database - Assign Plaza: Processing plaza assignments for the current dataset...");
-    document.getElementById('ihmcl-sub-dropdown').classList.add('collapsed-sub');
+    const ihmclDropdown = document.getElementById('ihmcl-sub-dropdown');
+    if (ihmclDropdown) ihmclDropdown.classList.add('collapsed-sub');
 }
 
 function runSCF() {
     alert("IHMCL Database - SCF: Computing Seasonal Correction Factors...");
-    document.getElementById('ihmcl-sub-dropdown').classList.add('collapsed-sub');
+    const ihmclDropdown = document.getElementById('ihmcl-sub-dropdown');
+    if (ihmclDropdown) ihmclDropdown.classList.add('collapsed-sub');
 }
 
 function runAADT() {
     alert("IHMCL Database - AADT: Computing Annual Average Daily Traffic...");
-    document.getElementById('ihmcl-sub-dropdown').classList.add('collapsed-sub');
+    const ihmclDropdown = document.getElementById('ihmcl-sub-dropdown');
+    if (ihmclDropdown) ihmclDropdown.classList.add('collapsed-sub');
 }
 
 function customAADT() {
     alert("Custom AADT: This feature will allow you to import and apply custom AADT values.");
-    document.getElementById('base-sub-dropdown').classList.add('collapsed-sub');
+    const baseDropdown = document.getElementById('base-sub-dropdown');
+    if (baseDropdown) baseDropdown.classList.add('collapsed-sub');
 }
 
 function editResolvedPlace(origName) {

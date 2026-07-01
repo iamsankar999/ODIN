@@ -7,7 +7,7 @@ from shapely.geometry import Point
 
 def clean_zone_export(z_val):
     """Strips Polygon_ prefix if it exists in the shapefile"""
-    sv = str(z_val).strip()
+    sv = str(z_val).strip().strip("'")
     if sv.lower().startswith('polygon_'):
         sv = sv[8:]
     return sv
@@ -70,11 +70,15 @@ def _get_batch_spatial_info(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                 shapefile_gdf = shapefile_gdf.to_crs(epsg=4326)
             joined_z = gpd.sjoin(points_gdf, shapefile_gdf, how="left", predicate="within")
             for _, row in joined_z.iterrows():
-                z_val = None
-                for cand in ['ZONE_NO', 'Zone', 'zone', 'ZONE', 'ID', 'Name', 'NAME', 'zonenumber']:
-                    if cand in joined_z.columns:
-                        z_val = row[cand]
+                zone_col = None
+                cols_upper = {c.upper(): c for c in joined_z.columns}
+                for cand in ['ZONENUMBER', 'ZONENUM', 'ZONE_NUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']:
+                    if cand in cols_upper:
+                        zone_col = cols_upper[cand]
                         break
+                
+                if zone_col and zone_col in joined_z.columns:
+                    z_val = row[zone_col]
                 
                 lid = row['lookup_id']
                 if lid in results:
@@ -116,9 +120,8 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
         return None, {}
 
     # Bulk assignment initialization
-    new_cols = ['RESOLVED_ORIGIN', 'O_LAT', 'O_LNG', 'O_ZONE', 'O_DISTRICT', 'O_STATE', 'O_RESOLVED_BY',
-                'RESOLVED_DEST', 'D_LAT', 'D_LNG', 'D_ZONE', 'D_DISTRICT', 'D_STATE', 'D_RESOLVED_BY',
-                'Origin_code', 'Destination_code']
+    new_cols = ['RESOLVED_ORIGIN', 'O_LAT', 'O_LNG', 'O_DISTRICT', 'O_STATE', 'O_RESOLVED_BY',
+                'RESOLVED_DEST', 'D_LAT', 'D_LNG', 'D_DISTRICT', 'D_STATE', 'D_RESOLVED_BY']
     for col in new_cols:
         df[col] = '' if 'LAT' not in col and 'LNG' not in col else None
     
@@ -136,9 +139,6 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
             df.at[idx, 'O_LAT'] = o_res.get('lat')
             df.at[idx, 'O_LNG'] = o_res.get('lng')
             df.at[idx, 'O_RESOLVED_BY'] = o_res.get('resolved_by', '')
-            oz = clean_zone_export(o_spatial.get('zone', ''))
-            df.at[idx, 'O_ZONE'] = oz
-            df.at[idx, 'Origin_code'] = oz
             df.at[idx, 'O_DISTRICT'] = o_spatial.get('district', '')
             df.at[idx, 'O_STATE'] = o_spatial.get('state', '')
             
@@ -149,9 +149,6 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
             df.at[idx, 'D_LAT'] = d_res.get('lat')
             df.at[idx, 'D_LNG'] = d_res.get('lng')
             df.at[idx, 'D_RESOLVED_BY'] = d_res.get('resolved_by', '')
-            dz = clean_zone_export(d_spatial.get('zone', ''))
-            df.at[idx, 'D_ZONE'] = dz
-            df.at[idx, 'Destination_code'] = dz
             df.at[idx, 'D_DISTRICT'] = d_spatial.get('district', '')
             df.at[idx, 'D_STATE'] = d_spatial.get('state', '')
             
@@ -163,7 +160,7 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
                 xl.parse(sheet).to_excel(writer, sheet_name=sheet, index=False)
     return output.getvalue()
 
-def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None) -> bytes:
+def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None, include_zone: bool = False) -> bytes:
     districts_gdf = get_india_districts_gdf()
     spatial_lookup = _get_batch_spatial_info(mapping, shapefile_gdf, districts_gdf)
     
@@ -178,17 +175,23 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
             
         for o_name, p_name, res_data, lid in targets:
             spatial = spatial_lookup.get(lid, {})
-            rows.append({
+            row_data = {
                 "Original Name": o_name,
                 "Survey Location": p_name,
                 "Resolved Name": res_data.get('name', ''),
                 "Latitude": res_data.get('lat'),
                 "Longitude": res_data.get('lng'),
-                "Zone Number": clean_zone_export(spatial.get('zone', '')),
                 "District": spatial.get('district', ''),
                 "State": spatial.get('state', ''),
                 "Resolved By": res_data.get('resolved_by', '')
-            })
+            }
+            if include_zone:
+                # Prefer the zone stored in the resolution dict; fall back to PIP spatial result
+                zone_val = res_data.get('zone', '')
+                if not zone_val or zone_val in ['Unknown', 'Calculating...', 'Unknown Zone']:
+                    zone_val = spatial.get('zone', '')
+                row_data["Zone Number"] = clean_zone_export(zone_val) if zone_val else ''
+            rows.append(row_data)
         
     df = pd.DataFrame(rows)
     output = BytesIO()
@@ -258,17 +261,13 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                         else:
                             out_row[c] = row.get(c, "")
                     
-                    p_val = row.get(plaza_col, "")
-                    out_row["ORIGIN_ZONE"] = get_zone(row.get("ORIGIN"), p_val)
-                    out_row["DESTINATION_ZONE"] = get_zone(row.get("DESTINATION"), p_val)
                     out_data.append(out_row)
                     
                 df_out = pd.DataFrame(out_data)
                 
                 final_cols = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", "COMMODITY_TRIP_PURPOSE", 
-                    "DIRECTION", "PLAZA_NAME", "ORIGIN_ZONE", "DESTINATION_ZONE", 
-                    "COMMODITY_CODE_DETAILED", "COMMODITY_CODE_ABSTRACT"
+                    "DIRECTION", "PLAZA_NAME", "COMMODITY_CODE_DETAILED", "COMMODITY_CODE_ABSTRACT"
                 ]
                 df_out = df_out[[c for c in final_cols if c in df_out.columns]]
                 df_out.to_excel(writer, sheet_name="Resolved_rawOD", index=False)
@@ -365,8 +364,6 @@ def generate_rv_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDa
                                 df.at[idx, 'Latitude'] = res_data['lat']
                             if 'lng' in res_data:
                                 df.at[idx, 'Longitude'] = res_data['lng']
-                            if 'zone' in res_data:
-                                df.at[idx, 'Zone Number'] = clean_zone_export(res_data['zone'])
                             if 'resolved_by' in res_data:
                                 df.at[idx, 'Resolved By'] = res_data['resolved_by']
                             
@@ -395,7 +392,7 @@ def update_zones_with_shapefile(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoD
     # Identify the zone identifier column
     zone_col = None
     cols_upper = {c.upper(): c for c in shapefile_gdf.columns}
-    for candidate in ['ZONENUMBER', 'ZONENUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']:
+    for candidate in ['ZONENUMBER', 'ZONENUM', 'ZONE_NUM', 'ZONE_NO', 'ZONE', 'ID', 'NAME', 'FID', 'OBJECTID']:
         if candidate in cols_upper:
             zone_col = cols_upper[candidate]
             break

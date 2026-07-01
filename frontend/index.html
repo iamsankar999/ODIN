@@ -48,7 +48,7 @@
                 <img src="assets/logo.svg" alt="Int-OD Logo" class="intro-logo">
                 <h1 class="intro-title">ODIN</h1>
                 <p class="intro-subtitle">Origin-Destination Insights & Navigator</p>
-                <div id="odin-version-display" class="odin-version-tag">v2.5.8</div>
+                <div id="odin-version-display" class="odin-version-tag">v2.5.9</div>
                 <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem;">
                     <button class="btn btn-primary btn-wizard" onclick="handleLaunchClick()"
                         style="width: 280px; display: flex; align-items: center; justify-content: center; gap: 12px;">
@@ -116,97 +116,87 @@
                 </div>
 
                 <div class="onboarding-grid"
-                    style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem; align-items: start;">
-                    <!-- Project Selection Column -->
-                    <div class="setup-column-left" style="display: flex; flex-direction: column; gap: 1.5rem;">
-                        <!-- New Project Section -->
-                        <div id="panel-new-project" class="onboarding-card" style="margin:0;">
-                            <h4>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 0 0 1-2 2H5a2 0 0 1-2-2v-4"></path>
-                                    <polyline points="17 8 12 3 7 8"></polyline>
-                                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                                </svg>
-                                New Project
-                            </h4>
-                            <div style="display: flex; gap: 1rem;">
-                                <label for="wizard-shapefile-upload"
-                                    class="btn btn-sm btn-outline dataset-btn not-loaded" id="wizard-shp-btn"
-                                    style="flex: 1;">
-                                    Upload Shapefile
-                                    <input type="file" id="wizard-shapefile-upload" accept=".zip,.shp"
-                                        style="display:none;" onchange="handleWizardFileUpload(this, 'shp')">
-                                </label>
-                                <label for="wizard-od-upload" class="btn btn-sm btn-outline dataset-btn not-loaded"
-                                    id="wizard-od-btn" style="flex: 1;">
-                                    Upload OD Dataset
-                                    <input type="file" id="wizard-od-upload" accept=".csv,.xlsx" style="display:none;"
-                                        onchange="handleWizardFileUpload(this, 'od')">
-                                </label>
-                            </div>
-                            <div id="onboarding-files-status" class="onboarding-status"
-                                style="text-align: center; margin-top: 0.5rem;">
-                                <span id="status-shp" class="status-pending">●</span> Shapefile
-                                &nbsp;&nbsp;
-                                <span id="status-od" class="status-pending">●</span> OD Dataset
-                            </div>
-                        </div>
+                    style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; align-items: start;">
 
-                        <!-- Open Project Section -->
-                        <div id="panel-open-project" class="onboarding-card" style="margin:0;">
-                            <h4>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path
-                                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
-                                    </path>
-                                </svg>
-                                Open Project
-                            </h4>
-                            <button class="btn btn-sm btn-outline dataset-btn not-loaded" id="project-zip-btn"
-                                onclick="openProjectWithHandle()">
-                                Select Project ZIP
-                            </button>
-                            <input type="file" id="project-zip-upload" accept=".zip" style="display:none;"
-                                onchange="handleProjectZipUpload(this)">
-                            <div id="zip-status" class="onboarding-status"
-                                style="text-align: center; margin-top: 0.5rem;">
-                                <span id="status-zip" class="status-pending">●</span> No ZIP selected
-                            </div>
+                    <!-- New Project Column -->
+                    <div id="panel-new-project" class="onboarding-card" style="margin:0;">
+                        <h4>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 0 0 1-2 2H5a2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            New Project
+                        </h4>
+                        <label for="wizard-od-upload" class="btn btn-sm btn-outline dataset-btn not-loaded"
+                            id="wizard-od-btn" style="width: 100%;">
+                            Upload OD Dataset
+                            <input type="file" id="wizard-od-upload" accept=".csv,.xlsx" style="display:none;"
+                                onchange="handleWizardFileUpload(this, 'od')">
+                        </label>
+                        <div id="onboarding-files-status" class="onboarding-status"
+                            style="text-align: center; margin-top: 0.5rem;">
+                            <span id="status-od" class="status-pending">●</span> OD Dataset
+                        </div>
+                    </div>
+
+                    <!-- Open Project Column -->
+                    <div id="panel-open-project" class="onboarding-card" style="margin:0;">
+                        <h4>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                                </path>
+                            </svg>
+                            Open Project
+                        </h4>
+                        <button class="btn btn-sm btn-outline dataset-btn not-loaded" id="project-zip-btn"
+                            onclick="openProjectWithHandle()" style="width: 100%;">
+                            Select Project ZIP
+                        </button>
+                        <input type="file" id="project-zip-upload" accept=".zip" style="display:none;"
+                            onchange="handleProjectZipUpload(this)">
+                        <div id="zip-status" class="onboarding-status"
+                            style="text-align: center; margin-top: 0.5rem;">
+                            <span id="status-zip" class="status-pending">●</span> No ZIP selected
+                        </div>
+                        <div style="margin-top: 1rem; border-top: 1px dashed var(--border); padding-top: 1rem; display: none;" id="append-data-section">
+                            <label for="append-od-upload" class="btn btn-sm btn-outline dataset-btn" id="append-od-btn" style="width: 100%; border-style: dashed;">
+                                + Append Extra OD Data
+                                <input type="file" id="append-od-upload" accept=".xlsx" style="display:none;" onchange="handleAppendDataUpload(this)">
+                            </label>
                         </div>
                     </div>
 
                     <!-- User Setup Column -->
-                    <div class="setup-column-right">
-                        <div class="onboarding-card" style="height: 100%; display: flex; flex-direction: column;">
-                            <h4 style="display:flex; align-items:center; justify-content:space-between;">
-                                <span style="display:flex; align-items:center; gap:8px;">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M17 21v-2a4 2 0 0 0-4-4H5a4 2 0 0 0-4 4v2"></path>
-                                        <circle cx="9" cy="7" r="4"></circle>
-                                        <path d="M23 21v-2a4 2 0 0 0-3-3.87"></path>
-                                        <path d="M16 3.13a4 2 0 0 1 0 7.75"></path>
-                                    </svg>
-                                    User Setup
-                                </span>
-                                <button id="user-setup-edit-btn" class="btn btn-sm btn-outline"
-                                    style="padding:2px 12px; font-size:0.78rem; display:none;"
-                                    onclick="toggleUserSetupEdit()">Edit</button>
-                            </h4>
-                            <!-- Wrapper locked when project ZIP is loaded -->
-                            <div id="user-setup-fields">
-                                <div
-                                    style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
-                                    <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
-                                    <input type="number" id="wizard-user-count" class="user-count-input" value="1"
-                                        min="1" max="20" onchange="generateWizardUserInputs()">
-                                </div>
-                                <div id="wizard-user-names" class="custom-scroll"
-                                    style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
-                                    <!-- User inputs -->
-                                </div>
+                    <div class="onboarding-card" style="margin:0; display: flex; flex-direction: column;">
+                        <h4 style="display:flex; align-items:center; justify-content:space-between;">
+                            <span style="display:flex; align-items:center; gap:8px;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 2 0 0 0-4-4H5a4 2 0 0 0-4 4v2"></path>
+                                    <circle cx="9" cy="7" r="4"></circle>
+                                    <path d="M23 21v-2a4 2 0 0 0-3-3.87"></path>
+                                    <path d="M16 3.13a4 2 0 0 1 0 7.75"></path>
+                                </svg>
+                                User Setup
+                            </span>
+                            <button id="user-setup-edit-btn" class="btn btn-sm btn-outline"
+                                style="padding:2px 12px; font-size:0.78rem; display:none;"
+                                onclick="toggleUserSetupEdit()">Edit</button>
+                        </h4>
+                        <div id="user-setup-fields">
+                            <div
+                                style="margin-bottom:12px; display: flex; align-items: center; justify-content: space-between;">
+                                <span style="font-size:0.9rem; color:#94a3b8;">User Count:</span>
+                                <input type="number" id="wizard-user-count" class="user-count-input" value="1"
+                                    min="1" max="20" onchange="generateWizardUserInputs()">
+                            </div>
+                            <div id="wizard-user-names" class="custom-scroll"
+                                style="overflow-y:auto; padding-right: 5px; flex: 1; max-height: 230px;">
+                                <!-- User inputs -->
                             </div>
                         </div>
                     </div>
@@ -262,7 +252,7 @@
                         <h3>Zone assign</h3>
                         <p class="mode-desc">assign zones to places from the field data</p>
                     </div>
-                    <div class="mode-card" onclick="selectModeForSetup('Place assign')">
+                    <div class="mode-card" onclick="enterPlaceAssign()">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -550,6 +540,7 @@
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <script src="js/basenumber.js"></script>
         <script src="js/review_viz.js?v=2.5.2"></script>
+        <script src="js/place_assign.js?v=2.5.2"></script>
 
 
         <!-- User Management Modal -->
@@ -1002,6 +993,140 @@
                     </div>
                 </section>
             </main>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!--  PLACE ASSIGN MODE (Fully Independent View)                           -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div id="view-place-assign" class="app-view">
+        <!-- PA Full-Screen Loading Overlay -->
+        <div id="pa-loading-overlay" class="loading-overlay">
+            <div class="spinner"></div>
+            <div class="loading-text" id="pa-loading-text">Processing...</div>
+        </div>
+
+        <div class="app-container">
+            <!-- PA Header -->
+            <header class="app-header">
+                <div class="header-section header-left">
+                    <img src="assets/logo.svg" alt="ODIN Logo" class="header-logo">
+                    <div class="logo">
+                        <h1>ODIN</h1>
+                    </div>
+                    <div class="user-selector" id="pa-user-selector-container">
+                        <div class="btn btn-sm btn-outline user-icon" onclick="paToggleUserDropdown()" title="Select User">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                            <span id="pa-current-user-display" class="current-user-text">All Users</span> ▾
+                        </div>
+                        <div class="user-dropdown" id="pa-user-dropdown"></div>
+                    </div>
+                    <div class="theme-toggle-ios">
+                        <input type="checkbox" id="pa-theme-toggle" onchange="paToggleTheme()">
+                        <label for="pa-theme-toggle" class="toggle-track">
+                            <span class="toggle-thumb" id="pa-toggle-thumb">🌙</span>
+                        </label>
+                    </div>
+                    <div class="mode-indicator">
+                        <span class="mode-text">Place assign</span>
+                    </div>
+                </div>
+
+                <div class="header-section header-center">
+                    <button class="btn btn-sm btn-danger" onclick="paGoBack()" style="background: rgba(239, 68, 68, 0.1); border-color: #ef4444; color: #f87171;">Back</button>
+                    <button class="btn btn-sm btn-outline" onclick="paDownloadProgress()" title="Export">Export</button>
+                    <label for="pa-geojson-upload-toolbar" class="btn btn-sm btn-outline" id="pa-geojson-toolbar-btn" title="Upload GeoJSON zone boundaries" style="cursor:pointer; font-size:0.75rem; padding: 4px 10px;">
+                        🗺 GeoJSON
+                        <input type="file" id="pa-geojson-upload-toolbar" accept=".geojson,.json" style="display:none;" onchange="paHandleGeoJsonUpload(this)">
+                    </label>
+
+                    <div class="manual-search-card" style="position: relative;">
+                        <input type="text" id="pa-manual-search-input" placeholder="Search place..." style="flex: 1; min-width: 100px; padding: 0.25rem 0.5rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text-primary); font-size: 0.7rem; outline: none; height: 32px;" autocomplete="off">
+                        <button class="btn btn-sm btn-primary" onclick="paManualTextSearch()">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="header-section header-right" style="flex:1; display:flex; align-items:center; justify-content:flex-end; gap:0.75rem;">
+                    <div class="pending-badge-container" style="display: flex; align-items: center;">
+                        <span id="pa-completion-progress" class="completion-badge" title="Overall OD Pair Validation Progress" style="margin-right: 0.5rem; background: rgba(34, 197, 94, 0.1); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.2); padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 500;">0%</span>
+                        <span id="pa-pending-count" class="unmatched-count-badge">Pending: 0</span>
+                    </div>
+
+                    <div class="place-navigator" style="position: relative;">
+                        <button class="btn btn-sm btn-outline navigator-btn" onclick="paNavigatePlace(-1)">&#8592;</button>
+                        <div class="navigator-info" style="cursor: default;" title="Current pending place">
+                            <div class="current-place-display" id="pa-selected-place-name">No data loaded</div>
+                        </div>
+                        <button class="btn btn-sm btn-outline navigator-btn" onclick="paNavigatePlace(1)">&#8594;</button>
+                    </div>
+
+                    <div id="pa-place-zone-tag" class="place-zone-tag" style="display: flex;">
+                        <span class="zone-label">Zone</span>
+                        <span id="pa-place-zone-display" class="zone-number">--</span>
+                    </div>
+
+                    <div class="review-selector" id="pa-review-selector-container">
+                        <button class="btn btn-sm btn-outline review-btn" onclick="paToggleReviewDropdown()" style="min-width: 85px;">Review ▾</button>
+                        <div class="file-dropdown" id="pa-review-dropdown"></div>
+                    </div>
+
+                    <div class="status-indicator" title="Backend Status">
+                        <span class="status-dot" id="pa-system-dot"></span>
+                    </div>
+
+                    <button class="btn btn-sm btn-outline" title="Shutdown ODIN" onclick="shutdownApp()">✕</button>
+                </div>
+            </header>
+
+            <!-- PA Main Content: 100% Map -->
+            <main class="main-content">
+                <section class="pane right-pane" style="flex: 1; max-width: 100%;">
+                    <div class="map-wrapper" style="height: 100%;">
+                        <div id="pa-map" class="map-container" style="height: 100%; border-radius: 0;">
+                            <div class="map-placeholder">
+                                <p>Map will load here.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- PA Data Source Dialog -->
+        <div class="rv-validator-overlay" id="pa-datasource-overlay" style="display: none; z-index: 10000;">
+            <div class="rv-validator-dialog" style="width: 440px;">
+                <div class="rv-validator-icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                </div>
+                <h3 class="rv-validator-title">Place Assign Setup</h3>
+                <p class="rv-validator-desc">Upload a Zone Assign ZIP project file to continue refining locations.</p>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <button class="rv-validator-btn" onclick="paLoadNewProject()">
+                        Select Project ZIP
+                    </button>
+                    <div id="pa-geojson-upload-section" style="border-top: 1px dashed var(--border); padding-top: 0.75rem; display:none;">
+                        <p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 0.5rem 0; text-align:center;">Zone Boundaries (optional)</p>
+                        <label for="pa-geojson-upload" class="rv-validator-btn" style="background: transparent; border: 1px dashed var(--border); color: var(--text-muted); font-size:0.85rem; cursor:pointer; text-align:center; display:block; padding: 0.6rem;">
+                            <span id="pa-geojson-btn-label">📂 Upload Zone Boundaries (.geojson)</span>
+                            <input type="file" id="pa-geojson-upload" accept=".geojson,.json" style="display:none;" onchange="paHandleGeoJsonUpload(this)">
+                        </label>
+                    </div>
+                    <button class="rv-ds-cancel-btn" onclick="paDismissDataSourceDialog()">
+                        Cancel
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
