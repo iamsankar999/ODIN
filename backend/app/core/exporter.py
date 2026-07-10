@@ -160,7 +160,7 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
                 xl.parse(sheet).to_excel(writer, sheet_name=sheet, index=False)
     return output.getvalue()
 
-def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None, include_zone: bool = False) -> bytes:
+def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None, include_zone: bool = False, commodity_mapping: Dict[str, Any] = None) -> bytes:
     districts_gdf = get_india_districts_gdf()
     spatial_lookup = _get_batch_spatial_info(mapping, shapefile_gdf, districts_gdf)
     
@@ -243,7 +243,7 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                 cols_to_keep = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", 
                     "COMMODITY_TRIP_PURPOSE", "DIRECTION", "PLAZA_NAME", 
-                    "COMMODITY_CODE_DETAILED", "COMMODITY_CODE_ABSTRACT"
+                    "COMMODITY_CODE_1_28", "COMMODITY_CODE_1_17"
                 ]
                 
                 plaza_col = "PLAZA_NAME" 
@@ -252,6 +252,29 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                         plaza_col = cand
                         break
                         
+                # Apply commodity codes: DB auto-matches + user manual assignments
+                from app.core.commodity_matcher import exact_match_commodity
+                comm_map = commodity_mapping or {}
+                
+                def _get_comm_code(row):
+                    """Returns (detailed_code, abstract_code) for a row."""
+                    # If already coded from DB auto-match (in the excel file), keep it
+                    code_28 = row.get('COMMODITY_CODE_1_28', '')
+                    code_17 = row.get('COMMODITY_CODE_1_17', '')
+                    if code_28 and str(code_28).strip() and str(code_28).strip() != 'nan':
+                        return str(code_28).strip(), str(code_17).strip() if code_17 else ''
+                    # Try user manual assignment
+                    purpose = row.get('COMMODITY_TRIP_PURPOSE', '')
+                    if purpose and str(purpose).strip():
+                        purp_clean = str(purpose).strip()
+                        if purp_clean in comm_map:
+                            return str(comm_map[purp_clean].get('Detailed_Comm_code', '')), str(comm_map[purp_clean].get('Abstract_Comm_code', ''))
+                        # Try DB auto-match (case-insensitive)
+                        db_match = exact_match_commodity(purp_clean)
+                        if db_match:
+                            return str(db_match.get('Detailed_Comm_code', '')), str(db_match.get('Abstract_Comm_code', ''))
+                    return '', ''
+
                 out_data = []
                 for _, row in df_raw.iterrows():
                     out_row = {}
@@ -261,13 +284,17 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                         else:
                             out_row[c] = row.get(c, "")
                     
+                    # Apply commodity codes
+                    det_code, abs_code = _get_comm_code(row)
+                    out_row['COMMODITY_CODE_1_28'] = det_code
+                    out_row['COMMODITY_CODE_1_17'] = abs_code
                     out_data.append(out_row)
                     
                 df_out = pd.DataFrame(out_data)
                 
                 final_cols = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", "COMMODITY_TRIP_PURPOSE", 
-                    "DIRECTION", "PLAZA_NAME", "COMMODITY_CODE_DETAILED", "COMMODITY_CODE_ABSTRACT"
+                    "DIRECTION", "PLAZA_NAME", "COMMODITY_CODE_1_28", "COMMODITY_CODE_1_17"
                 ]
                 df_out = df_out[[c for c in final_cols if c in df_out.columns]]
                 df_out.to_excel(writer, sheet_name="Resolved_rawOD", index=False)

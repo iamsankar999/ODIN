@@ -2,8 +2,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .api import endpoints
+from app.api import endpoints
 from app.core.ihmcl import load_ihmcl_data
+from app.core.commodity_matcher import load_commodity_databases
 from app.version import LOCAL_VERSION, PROJECT_ROOT
 
 # Frontend directory
@@ -14,6 +15,7 @@ app = FastAPI(title="OD Place-Name Validation System API")
 @app.on_event("startup")
 def startup_event():
     load_ihmcl_data()
+    load_commodity_databases()
 
 # Configure CORS to allow the frontend to access the API from anywhere
 app.add_middleware(

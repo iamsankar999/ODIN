@@ -13,6 +13,7 @@
 
 *   **Spatial Intelligence Engine**: Automated Point-in-Polygon (PIP) lookups using local Shapefiles for administrative alignment.
 *   **Progressive Resolution**: Batch-resolve survey locations using phonetic matching (Double Metaphone) and fuzzy similarity.
+*   **Commodity Coding Workflow**: Automatically match and manually resolve standard commodity codes for unrecognized trip purposes.
 *   **Review & Visualization (R&V)**: Advanced analytics for detecting intrazonal trips and illogical OD pairs with interactive map suggestions.
 *   **Transparent Auto-Save**: Background synchronization using the modern **File System Access API**.
 *   **Portable Deployment**: One-click launch on Windows via an embedded Python environment.

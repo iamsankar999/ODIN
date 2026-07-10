@@ -200,8 +200,15 @@ async def upload_excel(
             "ca_codes_detailed": parsed_data.get("ca_codes_detailed", []),
             "resolved_raw_od": parsed_data.get("resolved_raw_od", []),
             "preliminary_analysis": preliminary_analysis,
-            "data": processed_data
+            "data": processed_data,
+            "unresolved_commodities": parsed_data.get("unresolved_commodities", []),
+            "commodity_suggestions": []
         }
+        
+        if mode == "Zone assign":
+            from app.core.commodity_matcher import get_commodity_suggestions
+            response_data["commodity_suggestions"] = get_commodity_suggestions()
+            
         return clean_json(response_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -439,12 +446,14 @@ async def export_progress(
     shapefile_zip: UploadFile = File(None),
     plaza_mapping: Optional[str] = Form(None),
     project_config: Optional[str] = Form(None),
-    mode: Optional[str] = Form(None)
+    mode: Optional[str] = Form(None),
+    commodity_mapping: Optional[str] = Form(None)
 ):
     try:
         from app.core.exporter import update_zones_with_shapefile
         mapping_dict = json.loads(mapping)
         plaza_mapping_dict = json.loads(plaza_mapping) if plaza_mapping else {}
+        commodity_mapping_dict = json.loads(commodity_mapping) if commodity_mapping else {}
         
         excel_bytes = None
         if excel_file is not None:
@@ -461,7 +470,7 @@ async def export_progress(
         # Removed Place assign logic for Zone Assign export
 
         # 1. Generate Resolved Places Excel
-        resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes)
+        resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes, commodity_mapping=commodity_mapping_dict)
         
         # 2. Generate Survey Locations Excel
         survey_xlsx = generate_survey_locations_excel(plaza_mapping_dict)

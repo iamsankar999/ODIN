@@ -35,6 +35,10 @@ let currentUploadedFile = null; // Stash the original file for multi-sheet expor
 let plazaMappingConfirmed = false; // Toggle for survey mapping view
 let uniquePlazas = []; // List of all survey locations
 
+// Commodity Coding State (Zone Assign Mode)
+let commodityMapping = {}; // { "COMMODITY_TRIP_PURPOSE value": { Detailed_Comm_code, Abstract_Comm_code } }
+let pendingCommodityData = { unresolved: [], suggestions: [], afterConfirm: null };
+
 let globalTotalOccurrences = 0;
 let placeOccurrencesMap = {};
 let selectedFilterPlaza = null;
@@ -695,6 +699,7 @@ async function parseProjectZip(file) {
         console.log("Restored mode:", currentMode);
         if (cfg.comm_abstract) COMMODITIES_ABSTRACT = cfg.comm_abstract;
         if (cfg.comm_detailed) COMMODITIES_DETAILED = cfg.comm_detailed;
+        if (cfg.commodity_mapping) commodityMapping = cfg.commodity_mapping;
         if (cfg.users && Array.isArray(cfg.users) && cfg.users.length > 0) {
             allUsers = cfg.users;
             console.log("Restored users:", allUsers);
@@ -1147,8 +1152,24 @@ async function handleAppendDataUpload(input) {
         updateNavigatorDisplay();
 
         // Build the continuation action (runs after preliminary analysis or immediately)
+        const unresolvedCommodities = result.unresolved_commodities || [];
+        const commoditySuggestions = result.commodity_suggestions || [];
+        
         const afterPreliminary = () => {
-            if (newSurveyLocations) {
+            if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
+                // Commodity coding step before survey mapping
+                pendingCommodityData.unresolved = unresolvedCommodities;
+                pendingCommodityData.suggestions = commoditySuggestions;
+                pendingCommodityData.afterConfirm = () => {
+                    if (newSurveyLocations) {
+                        setupSurveyLocations();
+                    } else {
+                        alert(`Data merged! Found ${newPlacesFoundCount} new places to resolve.`);
+                        selectMode(currentMode);
+                    }
+                };
+                openCommodityModal();
+            } else if (newSurveyLocations) {
                 // Open survey mapping for new locations only
                 setupSurveyLocations();
             } else {
@@ -1312,10 +1333,37 @@ async function handleFileUpload(event, isFromZip = false) {
             filterPlacesByUser();
             checkWizardCompletion();
             
+            // Store commodity data for use after preliminary analysis
+            const unresolvedCommodities = result.unresolved_commodities || [];
+            const commoditySuggestions = result.commodity_suggestions || [];
+            
             // Render Preliminary Analysis if present and in Zone assign mode
             if (result.preliminary_analysis && currentMode === "Zone assign") {
                 renderPreliminaryAnalysis(result.preliminary_analysis);
-                document.getElementById('preliminary-analysis-modal').classList.add('active');
+                const prelimModal = document.getElementById('preliminary-analysis-modal');
+                prelimModal.classList.add('active');
+                
+                // Override the Continue button to open commodity modal next (if needed)
+                const btn = prelimModal.querySelector('.modal-footer .btn-primary');
+                if (btn) {
+                    const origClick = btn.onclick;
+                    const origText = btn.textContent;
+                    btn.textContent = 'Next';
+                    const handler = () => {
+                        btn.removeEventListener('click', handler);
+                        btn.onclick = origClick;
+                        btn.textContent = origText;
+                        closePreliminaryAnalysisModal();
+                        // Go to commodity modal or skip it
+                        if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
+                            pendingCommodityData.unresolved = unresolvedCommodities;
+                            pendingCommodityData.suggestions = commoditySuggestions;
+                            pendingCommodityData.afterConfirm = null; // new project - no survey step needed
+                            openCommodityModal();
+                        }
+                    };
+                    btn.addEventListener('click', handler);
+                }
             }
             
             // Silent success
@@ -1361,8 +1409,12 @@ async function downloadProgress() {
         mode: currentMode,
         users: allUsers,
         comm_abstract: COMMODITIES_ABSTRACT,
-        comm_detailed: COMMODITIES_DETAILED
+        comm_detailed: COMMODITIES_DETAILED,
+        commodity_mapping: commodityMapping
     }));
+    
+    // Add commodity mapping (user-assigned codes for unresolved commodities)
+    formData.append('commodity_mapping', JSON.stringify(commodityMapping));
 
     showLoading("Generating Project ZIP Export...");
 
@@ -3213,6 +3265,169 @@ function toggleReviewDropdown() {
 
 function openProject() {
     alert("Open Project feature coming soon! This will allow you to resume a saved session by uploading a previously saved mapping file.");
+}
+
+// COMMODITY CODING MODAL FUNCTIONS
+/**
+ * Opens the Commodity Coding modal with the pending unresolved list and suggestions.
+ */
+function openCommodityModal() {
+    const modal = document.getElementById('commodity-modal');
+    if (!modal) { console.error("Commodity modal not found"); return; }
+    renderCommodityModal();
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.position = 'fixed';
+    modal.style.inset = '0';
+    modal.style.background = 'rgba(0,0,0,0.7)';
+    modal.style.zIndex = '20000';
+}
+
+/**
+ * Renders the full commodity modal UI.
+ */
+function renderCommodityModal() {
+    const unresolved = pendingCommodityData.unresolved || [];
+    const suggestions = pendingCommodityData.suggestions || [];
+    
+    // Update count
+    const countEl = document.getElementById('commodity-pending-count');
+    if (countEl) countEl.textContent = unresolved.length;
+    
+    // --- Left Pane: Unresolved list ---
+    const listContainer = document.getElementById('commodity-list-container');
+    if (listContainer) {
+        listContainer.innerHTML = '';
+        if (unresolved.length === 0) {
+            listContainer.innerHTML = `<div style="padding: 1rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">✅ All commodities resolved</div>`;
+        } else {
+            unresolved.forEach(comm => {
+                const item = document.createElement('div');
+                const isAssigned = commodityMapping[comm];
+                item.style.cssText = `padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; border: 1px solid ${isAssigned ? 'var(--success, #22c55e)' : 'var(--border)'}; background: ${isAssigned ? 'rgba(34,197,94,0.1)' : 'var(--bg-secondary)'}; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;`;
+                
+                const statusIcon = isAssigned ? '✓' : '○';
+                const statusColor = isAssigned ? 'var(--success, #22c55e)' : 'var(--text-muted)';
+                const assignedText = isAssigned ? `<span style="font-size:0.75rem; color: var(--success, #22c55e);">Code: ${commodityMapping[comm].Detailed_Comm_code}</span>` : '';
+                
+                item.innerHTML = `
+                    <span style="flex: 1; word-break: break-word;">${comm}</span>
+                    <span style="margin-left: 8px; color: ${statusColor}; font-size: 1rem;">${statusIcon}</span>
+                    ${assignedText}
+                `;
+                item.title = `Click to assign code for: ${comm}`;
+                item.onclick = () => {
+                    // Highlight selected item
+                    listContainer.querySelectorAll('div').forEach(d => d.style.outline = '');
+                    item.style.outline = '2px solid var(--accent)';
+                    
+                    // Show in suggestions header
+                    const selEl = document.getElementById('commodity-current-selection');
+                    if (selEl) selEl.textContent = `→ "${comm}"`;
+                    
+                    // Update the assign buttons in the right pane to assign to this commodity
+                    renderSuggestions(suggestions, comm);
+                };
+                listContainer.appendChild(item);
+            });
+        }
+    }
+    
+    // --- Right Pane: Suggestions ---
+    renderSuggestions(suggestions, null);
+    
+    // Wire up search
+    const searchInput = document.getElementById('commodity-search-input');
+    if (searchInput) {
+        searchInput.value = '';
+        searchInput.oninput = () => {
+            const currentComm = document.getElementById('commodity-current-selection')?.textContent?.replace(/^→ "|"$/g, '') || null;
+            renderSuggestions(suggestions, currentComm, searchInput.value);
+        };
+    }
+}
+
+function renderSuggestions(suggestions, targetCommodity, query = '') {
+    const tbody = document.getElementById('commodity-suggestions-body');
+    if (!tbody) return;
+    
+    const filtered = query 
+        ? suggestions.filter(s => 
+            String(s.Detailed_Comm_code || '').toLowerCase().includes(query.toLowerCase()) ||
+            String(s.Detailed_Comm_Name || '').toLowerCase().includes(query.toLowerCase()) ||
+            String(s.Abstract_Comm_Name || '').toLowerCase().includes(query.toLowerCase())
+          )
+        : suggestions;
+    
+    tbody.innerHTML = '';
+    filtered.forEach(s => {
+        const tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom: 1px solid var(--border); cursor: pointer;';
+        tr.onmouseover = () => tr.style.background = 'rgba(255,255,255,0.05)';
+        tr.onmouseout = () => tr.style.background = '';
+        
+        const assignBtn = targetCommodity 
+            ? `<button onclick="assignCommodity('${targetCommodity.replace(/'/g, "\\'")}', '${s.Detailed_Comm_code}', '${s.Abstract_Comm_code}')" style="padding: 3px 10px; font-size: 0.75rem; border: none; background: var(--accent); color: white; border-radius: 4px; cursor: pointer;">Assign</button>`
+            : `<span style="color: var(--text-muted); font-size: 0.75rem;">Select a commodity first</span>`;
+        
+        tr.innerHTML = `
+            <td style="padding: 8px;">${s.Detailed_Comm_code || ''}</td>
+            <td style="padding: 8px;">${s.Detailed_Comm_Name || ''}</td>
+            <td style="padding: 8px;">${s.Abstract_Comm_code || ''}</td>
+            <td style="padding: 8px;">${s.Abstract_Comm_Name || ''}</td>
+            <td style="padding: 8px;">${assignBtn}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+    
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-muted);">No suggestions found</td></tr>`;
+    }
+}
+
+/**
+ * Assigns a commodity code to a trip purpose value.
+ */
+function assignCommodity(commodityStr, detailedCode, abstractCode) {
+    commodityMapping[commodityStr] = { 
+        Detailed_Comm_code: detailedCode, 
+        Abstract_Comm_code: abstractCode 
+    };
+    // Re-render the modal to reflect the new assignment
+    renderCommodityModal();
+    // Keep the selection highlighted
+    const selEl = document.getElementById('commodity-current-selection');
+    if (selEl) selEl.textContent = `→ "${commodityStr}"`;
+    const searchInput = document.getElementById('commodity-search-input');
+    const query = searchInput?.value || '';
+    renderSuggestions(pendingCommodityData.suggestions || [], commodityStr, query);
+}
+
+/**
+ * Closes the commodity modal.
+ * @param {boolean} goBack - If true, re-opens preliminary analysis modal (Back button).
+ */
+function closeCommodityModal(goBack = false) {
+    const modal = document.getElementById('commodity-modal');
+    if (modal) modal.style.display = 'none';
+    if (goBack) {
+        // For now just close; user can navigate back manually
+        console.log("Commodity modal closed (Back)");
+    }
+}
+
+/**
+ * Proceeds from commodity modal to the next step (Survey Mapping or OD Coding).
+ * Called by the "Next" button in the commodity modal.
+ */
+function proceedToSurveyMapping() {
+    closeCommodityModal();
+    const afterConfirm = pendingCommodityData.afterConfirm;
+    if (typeof afterConfirm === 'function') {
+        afterConfirm();
+    }
+    // else: new project flow - no additional step needed; user can proceed via main UI
 }
 
 // SETUP PLACEHOLDERS

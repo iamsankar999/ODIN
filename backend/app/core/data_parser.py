@@ -21,6 +21,35 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
 
     df_main = clean_df(xl.parse("Auto_OD_input"))
     
+    unresolved_commodities = []
+    if mode == "Zone assign":
+        from app.core.commodity_matcher import exact_match_commodity
+        if 'COMMODITY_TRIP_PURPOSE' in df_main.columns:
+            if 'COMMODITY_CODE_1_28' not in df_main.columns:
+                df_main['COMMODITY_CODE_1_28'] = None
+            if 'COMMODITY_CODE_1_17' not in df_main.columns:
+                df_main['COMMODITY_CODE_1_17'] = None
+                
+            unique_unresolved = set()
+            for idx, row in df_main.iterrows():
+                purpose = row.get('COMMODITY_TRIP_PURPOSE')
+                if pd.notna(purpose):
+                    # Check if already manually coded in the excel sheet
+                    code_28 = row.get('COMMODITY_CODE_1_28')
+                    if pd.notna(code_28) and str(code_28).strip():
+                        continue
+                        
+                    match = exact_match_commodity(purpose)
+                    if match:
+                        df_main.at[idx, 'COMMODITY_CODE_1_28'] = match.get('Detailed_Comm_code')
+                        df_main.at[idx, 'COMMODITY_CODE_1_17'] = match.get('Abstract_Comm_code')
+                    else:
+                        unique_unresolved.add(str(purpose).strip())
+            
+            unresolved_commodities = sorted(list(unique_unresolved))
+            # Keep df_main clean
+            df_main = clean_df(df_main)
+
     print(f"Parsed Auto_OD_input. Shape: {df_main.shape}")
     print(f"Columns: {df_main.columns.tolist()}")
     
@@ -69,7 +98,8 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
         "ca_codes_abstract": ca_codes_abstract,
         "ca_codes_detailed": ca_codes_detailed,
         "od_codes": od_codes,
-        "resolved_raw_od": resolved_raw_od
+        "resolved_raw_od": resolved_raw_od,
+        "unresolved_commodities": unresolved_commodities if 'unresolved_commodities' in locals() else []
     }
 
 
