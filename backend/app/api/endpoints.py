@@ -202,12 +202,14 @@ async def upload_excel(
             "preliminary_analysis": preliminary_analysis,
             "data": processed_data,
             "unresolved_commodities": parsed_data.get("unresolved_commodities", []),
-            "commodity_suggestions": []
+            "auto_matched_commodities": parsed_data.get("auto_matched_commodities", {}),
+            "commodity_suggestions": {}
         }
         
         if mode == "Zone assign":
-            from app.core.commodity_matcher import get_commodity_suggestions
-            response_data["commodity_suggestions"] = get_commodity_suggestions()
+            from app.core.commodity_matcher import get_suggestions_for_unresolved
+            unresolved = parsed_data.get("unresolved_commodities", [])
+            response_data["commodity_suggestions"] = get_suggestions_for_unresolved(unresolved)
             
         return clean_json(response_data)
     except ValueError as e:

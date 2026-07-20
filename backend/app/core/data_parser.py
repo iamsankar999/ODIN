@@ -31,6 +31,7 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
                 df_main['COMMODITY_CODE_1_17'] = None
                 
             unique_unresolved = set()
+            auto_matched_dict = {}
             for idx, row in df_main.iterrows():
                 purpose = row.get('COMMODITY_TRIP_PURPOSE')
                 if pd.notna(purpose):
@@ -39,12 +40,14 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
                     if pd.notna(code_28) and str(code_28).strip():
                         continue
                         
+                    purpose_str = str(purpose).strip()
+                    unique_unresolved.add(purpose_str)
+                    
                     match = exact_match_commodity(purpose)
                     if match:
                         df_main.at[idx, 'COMMODITY_CODE_1_28'] = match.get('Detailed_Comm_code')
                         df_main.at[idx, 'COMMODITY_CODE_1_17'] = match.get('Abstract_Comm_code')
-                    else:
-                        unique_unresolved.add(str(purpose).strip())
+                        auto_matched_dict[purpose_str] = match
             
             unresolved_commodities = sorted(list(unique_unresolved))
             # Keep df_main clean
@@ -99,7 +102,8 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
         "ca_codes_detailed": ca_codes_detailed,
         "od_codes": od_codes,
         "resolved_raw_od": resolved_raw_od,
-        "unresolved_commodities": unresolved_commodities if 'unresolved_commodities' in locals() else []
+        "unresolved_commodities": unresolved_commodities if 'unresolved_commodities' in locals() else [],
+        "auto_matched_commodities": auto_matched_dict if 'auto_matched_dict' in locals() else {}
     }
 
 

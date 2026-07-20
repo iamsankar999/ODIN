@@ -430,6 +430,31 @@ async function startTask() {
             // uniquePlazas should be populated by the file upload handler
         }
 
+        // Intercept for Commodity Coding in Zone Assign mode before setting up auto-save or UI
+        const unresolvedTotal = (pendingCommodityData.unresolved || []).length;
+        if (currentMode === "Zone assign" && unresolvedTotal > 0) {
+            hideLoading();
+            
+            // Set afterConfirm to resume startTask
+            pendingCommodityData.afterConfirm = async () => {
+                showLoading(`Resuming ${currentMode} Task...`);
+                await finalizeStartTask();
+            };
+            
+            openCommodityModal();
+            return; // Stop execution here; it will resume via afterConfirm
+        }
+        
+        await finalizeStartTask();
+    } catch (err) {
+        console.error("Task start failed:", err);
+        alert(`Failed to start task: ${err.message}`);
+        hideLoading();
+    }
+}
+
+async function finalizeStartTask() {
+    try {
         // Initialize Auto-Save Handle (File System Access API)
         // If we opened a project with a handle, we already have it! No need to prompt again.
         if (!autoSaveHandle) {
@@ -472,7 +497,7 @@ async function startTask() {
         // Trigger initial auto-save to wrap original files and current progress state immediately
         triggerAutoSave();
     } catch (err) {
-        console.error("Task start failed:", err);
+        console.error("Task finalization failed:", err);
         alert(`Failed to start task: ${err.message}`);
         hideLoading();
     }
@@ -646,7 +671,8 @@ async function performAutoSave() {
         mode: currentMode,
         users: allUsers,
         comm_abstract: COMMODITIES_ABSTRACT,
-        comm_detailed: COMMODITIES_DETAILED
+        comm_detailed: COMMODITIES_DETAILED,
+        commodity_mapping: commodityMapping
     }));
 
     // 2. Original Files (Stashed in app state)
@@ -1153,13 +1179,20 @@ async function handleAppendDataUpload(input) {
 
         // Build the continuation action (runs after preliminary analysis or immediately)
         const unresolvedCommodities = result.unresolved_commodities || [];
-        const commoditySuggestions = result.commodity_suggestions || [];
+        const commoditySuggestions = result.commodity_suggestions || {};
+        const autoMatched = result.auto_matched_commodities || {};
+
+        // Pre-fill commodityMapping with auto-matched items
+        for (const [comm, match] of Object.entries(autoMatched)) {
+            commodityMapping[comm] = match;
+        }
         
         const afterPreliminary = () => {
             if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
                 // Commodity coding step before survey mapping
                 pendingCommodityData.unresolved = unresolvedCommodities;
                 pendingCommodityData.suggestions = commoditySuggestions;
+                pendingCommodityData.autoMatched = autoMatched;
                 pendingCommodityData.afterConfirm = () => {
                     if (newSurveyLocations) {
                         setupSurveyLocations();
@@ -1333,40 +1366,54 @@ async function handleFileUpload(event, isFromZip = false) {
             filterPlacesByUser();
             checkWizardCompletion();
             
-            // Store commodity data for use after preliminary analysis
+            // Store commodity data globally so startTask() can pick it up
             const unresolvedCommodities = result.unresolved_commodities || [];
-            const commoditySuggestions = result.commodity_suggestions || [];
+            const commoditySuggestions = result.commodity_suggestions || {};  // dict: {commodity: [suggestions]}
+            const autoMatched = result.auto_matched_commodities || {};
+
+            // Pre-fill commodityMapping with auto-matched items
+            for (const [comm, match] of Object.entries(autoMatched)) {
+                commodityMapping[comm] = match;
+            }
+            
+            if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
+                pendingCommodityData.unresolved = unresolvedCommodities;
+                pendingCommodityData.suggestions = commoditySuggestions;
+                pendingCommodityData.autoMatched = autoMatched;
+                pendingCommodityData.afterConfirm = null; // will be set by startTask
+            } else {
+                // Clear any stale commodity data if this file has none
+                pendingCommodityData.unresolved = [];
+                pendingCommodityData.suggestions = {};
+                pendingCommodityData.autoMatched = {};
+            }
             
             // Render Preliminary Analysis if present and in Zone assign mode
-            if (result.preliminary_analysis && currentMode === "Zone assign") {
+            if (result.preliminary_analysis && Object.keys(result.preliminary_analysis).length > 0 && currentMode === "Zone assign") {
                 renderPreliminaryAnalysis(result.preliminary_analysis);
                 const prelimModal = document.getElementById('preliminary-analysis-modal');
-                prelimModal.classList.add('active');
-                
-                // Override the Continue button to open commodity modal next (if needed)
-                const btn = prelimModal.querySelector('.modal-footer .btn-primary');
-                if (btn) {
-                    const origClick = btn.onclick;
-                    const origText = btn.textContent;
-                    btn.textContent = 'Next';
-                    const handler = () => {
-                        btn.removeEventListener('click', handler);
-                        btn.onclick = origClick;
-                        btn.textContent = origText;
-                        closePreliminaryAnalysisModal();
-                        // Go to commodity modal or skip it
-                        if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
-                            pendingCommodityData.unresolved = unresolvedCommodities;
-                            pendingCommodityData.suggestions = commoditySuggestions;
-                            pendingCommodityData.afterConfirm = null; // new project - no survey step needed
-                            openCommodityModal();
-                        }
-                    };
-                    btn.addEventListener('click', handler);
+                if (prelimModal) {
+                    prelimModal.classList.add('active');
+                    
+                    // Wire the Continue button: after dismissing prelim, show commodity modal if needed
+                    const continueBtn = prelimModal.querySelector('.modal-footer .btn-primary');
+                    if (continueBtn) {
+                        // Remove any existing listeners by cloning
+                        const newBtn = continueBtn.cloneNode(true);
+                        continueBtn.parentNode.replaceChild(newBtn, continueBtn);
+                        newBtn.onclick = null;
+                        newBtn.addEventListener('click', () => {
+                            closePreliminaryAnalysisModal();
+                            if (currentMode === "Zone assign" && pendingCommodityData.unresolved && pendingCommodityData.unresolved.length > 0 && !pendingCommodityData.afterConfirm) {
+                                // Show commodity modal immediately — afterConfirm will be set by startTask later
+                                openCommodityModal();
+                            }
+                        });
+                    }
                 }
             }
             
-            // Silent success
+            // Silent success — user proceeds via setup page buttons
         } else {
             alert(`Upload succeeded, but no unique OD pairs were found (Total records: ${result.total_rows || 0})`);
         }
@@ -1934,7 +1981,14 @@ function filterPlacesByUser() {
     unmatchedPlaces = filtered;
     currentIndex = 0;
     updateNavigatorDisplay();
-    renderCurrentPlace();
+    
+    // Only render if we are actually on the main view AND survey modal is not active
+    const mainView = document.getElementById('view-main');
+    const surveyModal = document.getElementById('survey-modal');
+    const surveyActive = surveyModal && surveyModal.classList.contains('active');
+    if (mainView && mainView.classList.contains('active') && !surveyActive) {
+        renderCurrentPlace();
+    }
 }
 
 function toggleUserDropdown() {
@@ -2749,6 +2803,10 @@ function navigatePlace(direction) {
 async function renderCurrentPlace() {
     if (unmatchedPlaces.length === 0) return;
 
+    // Don't fetch suggestions while survey location modal is open
+    const surveyModal = document.getElementById('survey-modal');
+    if (surveyModal && surveyModal.classList.contains('active')) return;
+
     const place = unmatchedPlaces[currentIndex];
 
     // Update Header Name
@@ -3268,12 +3326,17 @@ function openProject() {
 }
 
 // COMMODITY CODING MODAL FUNCTIONS
+
+// Tracks which commodity is currently selected in the modal
+let _selectedCommodity = null;
+
 /**
- * Opens the Commodity Coding modal with the pending unresolved list and suggestions.
+ * Opens the Commodity Coding modal.
  */
 function openCommodityModal() {
     const modal = document.getElementById('commodity-modal');
-    if (!modal) { console.error("Commodity modal not found"); return; }
+    if (!modal) { console.error('Commodity modal not found in DOM'); return; }
+    _selectedCommodity = null;
     renderCommodityModal();
     modal.style.display = 'flex';
     modal.style.alignItems = 'center';
@@ -3282,144 +3345,270 @@ function openCommodityModal() {
     modal.style.inset = '0';
     modal.style.background = 'rgba(0,0,0,0.7)';
     modal.style.zIndex = '20000';
+
+    // Auto-select first unassigned commodity
+    const unresolved = pendingCommodityData.unresolved || [];
+    const firstUnassigned = unresolved.find(c => !commodityMapping[c]);
+    if (firstUnassigned) selectCommodityItem(firstUnassigned);
+    else if (unresolved.length > 0) selectCommodityItem(unresolved[0]);
 }
 
 /**
- * Renders the full commodity modal UI.
+ * Renders the left pane (list) and refreshes the right pane for current selection.
  */
 function renderCommodityModal() {
     const unresolved = pendingCommodityData.unresolved || [];
-    const suggestions = pendingCommodityData.suggestions || [];
-    
-    // Update count
+    const autoMatchedDict = pendingCommodityData.autoMatched || {};
+
+    const autoAssignedList = unresolved.filter(c => autoMatchedDict[c]);
+    const manualList = unresolved.filter(c => !autoMatchedDict[c]);
+
+    // Update pending count (only unassigned)
     const countEl = document.getElementById('commodity-pending-count');
-    if (countEl) countEl.textContent = unresolved.length;
-    
-    // --- Left Pane: Unresolved list ---
+    const unassignedCount = unresolved.filter(c => !commodityMapping[c]).length;
+    if (countEl) countEl.textContent = unassignedCount;
+
+    // --- Auto Assigned Dropdown ---
+    const autoCountEl = document.getElementById('auto-assigned-count');
+    if (autoCountEl) autoCountEl.textContent = autoAssignedList.length;
+
+    const autoContainer = document.getElementById('auto-assigned-container');
+    if (autoContainer) {
+        autoContainer.innerHTML = '';
+        if (autoAssignedList.length === 0) {
+            autoContainer.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;">None</div>';
+        } else {
+            autoAssignedList.forEach(comm => {
+                const item = document.createElement('div');
+                item.style.cssText = 'padding:8px 10px; font-size:0.8rem; border-bottom:1px solid var(--border); color:var(--text-secondary); display:flex; flex-direction:column; gap:2px;';
+                const match = autoMatchedDict[comm];
+                const dbComm = match.Commodity || '';
+                const code = match.Detailed_Comm_code || '';
+                const detName = match.Detailed_Comm_Name || '';
+                item.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="word-break:break-word;font-weight:600;color:var(--text-primary);">${comm}</span>
+                        <span style="color:var(--success,#22c55e);white-space:nowrap;margin-left:8px;font-size:0.75rem;">&#10003; Auto</span>
+                    </div>
+                    <div style="display:flex;gap:8px;font-size:0.75rem;color:var(--text-muted);">
+                        <span>&#8594; <em>${dbComm}</em></span>
+                        <span style="color:var(--accent)">[${code}] ${detName}</span>
+                    </div>`;
+                autoContainer.appendChild(item);
+            });
+        }
+    }
+
+    // --- Left Pane (Manual List) ---
     const listContainer = document.getElementById('commodity-list-container');
     if (listContainer) {
         listContainer.innerHTML = '';
-        if (unresolved.length === 0) {
-            listContainer.innerHTML = `<div style="padding: 1rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">✅ All commodities resolved</div>`;
+        if (manualList.length === 0) {
+            listContainer.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.85rem;">&#10003; All user input resolved</div>';
         } else {
-            unresolved.forEach(comm => {
+            manualList.forEach(comm => {
                 const item = document.createElement('div');
-                const isAssigned = commodityMapping[comm];
-                item.style.cssText = `padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; border: 1px solid ${isAssigned ? 'var(--success, #22c55e)' : 'var(--border)'}; background: ${isAssigned ? 'rgba(34,197,94,0.1)' : 'var(--bg-secondary)'}; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;`;
-                
-                const statusIcon = isAssigned ? '✓' : '○';
-                const statusColor = isAssigned ? 'var(--success, #22c55e)' : 'var(--text-muted)';
-                const assignedText = isAssigned ? `<span style="font-size:0.75rem; color: var(--success, #22c55e);">Code: ${commodityMapping[comm].Detailed_Comm_code}</span>` : '';
-                
-                item.innerHTML = `
-                    <span style="flex: 1; word-break: break-word;">${comm}</span>
-                    <span style="margin-left: 8px; color: ${statusColor}; font-size: 1rem;">${statusIcon}</span>
-                    ${assignedText}
-                `;
-                item.title = `Click to assign code for: ${comm}`;
-                item.onclick = () => {
-                    // Highlight selected item
-                    listContainer.querySelectorAll('div').forEach(d => d.style.outline = '');
-                    item.style.outline = '2px solid var(--accent)';
-                    
-                    // Show in suggestions header
-                    const selEl = document.getElementById('commodity-current-selection');
-                    if (selEl) selEl.textContent = `→ "${comm}"`;
-                    
-                    // Update the assign buttons in the right pane to assign to this commodity
-                    renderSuggestions(suggestions, comm);
-                };
+                item.setAttribute('data-comm', comm);
+                const isAssigned = !!commodityMapping[comm];
+                const isSelected = comm === _selectedCommodity;
+
+                item.style.cssText = [
+                    'padding:8px 12px',
+                    'border-radius:6px',
+                    'cursor:pointer',
+                    'font-size:0.85rem',
+                    'border:1px solid ' + (isSelected ? 'var(--accent,#6366f1)' : (isAssigned ? 'var(--success,#22c55e)' : 'var(--border)')),
+                    'background:' + (isSelected ? 'rgba(99,102,241,0.15)' : (isAssigned ? 'rgba(34,197,94,0.08)' : 'var(--bg-secondary)')),
+                    'margin-bottom:6px',
+                    'display:flex',
+                    'align-items:center',
+                    'justify-content:space-between',
+                    'outline:' + (isSelected ? '2px solid var(--accent,#6366f1)' : 'none')
+                ].join(';');
+
+                const codeLabel = isAssigned
+                    ? '<span style="font-size:0.72rem;color:var(--success,#22c55e);margin-left:6px;">[' + commodityMapping[comm].Detailed_Comm_code + ']</span>'
+                    : '';
+                const icon = isAssigned
+                    ? '<span style="color:var(--success,#22c55e);">&#10003;</span>'
+                    : '<span style="color:var(--text-muted);">&#9675;</span>';
+
+                item.innerHTML = '<span style="flex:1;word-break:break-word;">' + comm + codeLabel + '</span>' + icon;
+                item.title = 'Click to assign code';
+                item.onclick = () => selectCommodityItem(comm);
                 listContainer.appendChild(item);
             });
         }
     }
-    
-    // --- Right Pane: Suggestions ---
-    renderSuggestions(suggestions, null);
-    
+
     // Wire up search
     const searchInput = document.getElementById('commodity-search-input');
     if (searchInput) {
-        searchInput.value = '';
         searchInput.oninput = () => {
-            const currentComm = document.getElementById('commodity-current-selection')?.textContent?.replace(/^→ "|"$/g, '') || null;
-            renderSuggestions(suggestions, currentComm, searchInput.value);
+            if (_selectedCommodity) renderSuggestions(_selectedCommodity, searchInput.value);
         };
     }
+
+    // Refresh right pane
+    if (_selectedCommodity) {
+        renderSuggestions(_selectedCommodity, document.getElementById('commodity-search-input')?.value || '');
+    } else {
+        const tbody = document.getElementById('commodity-suggestions-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:1rem;text-align:center;color:var(--text-muted);">&larr; Select a commodity from the list</td></tr>';
+        const selEl = document.getElementById('commodity-current-selection');
+        if (selEl) selEl.textContent = '— none selected —';
+    }
 }
 
-function renderSuggestions(suggestions, targetCommodity, query = '') {
+/**
+ * Selects a commodity item and loads its suggestions.
+ */
+function selectCommodityItem(comm) {
+    _selectedCommodity = comm;
+    const selEl = document.getElementById('commodity-current-selection');
+    if (selEl) selEl.textContent = '\u2192 "' + comm + '"';
+
+    // Update left pane highlights
+    const listContainer = document.getElementById('commodity-list-container');
+    if (listContainer) {
+        listContainer.querySelectorAll('[data-comm]').forEach(el => {
+            const c = el.getAttribute('data-comm');
+            const isAssigned = !!commodityMapping[c];
+            const isSel = c === comm;
+            el.style.outline = isSel ? '2px solid var(--accent,#6366f1)' : 'none';
+            el.style.border = '1px solid ' + (isSel ? 'var(--accent,#6366f1)' : (isAssigned ? 'var(--success,#22c55e)' : 'var(--border)'));
+            el.style.background = isSel ? 'rgba(99,102,241,0.15)' : (isAssigned ? 'rgba(34,197,94,0.08)' : 'var(--bg-secondary)');
+        });
+    }
+
+    // Reset search and render suggestions
+    const searchInput = document.getElementById('commodity-search-input');
+    if (searchInput) searchInput.value = '';
+    renderSuggestions(comm, '');
+}
+
+/**
+ * Renders per-commodity suggestions in the right pane.
+ * pendingCommodityData.suggestions is a dict: { commodity: [{Detailed_Comm_code, Detailed_Comm_Name, Abstract_Comm_code, Abstract_Comm_Name, score}] }
+ */
+function renderSuggestions(targetCommodity, query) {
     const tbody = document.getElementById('commodity-suggestions-body');
     if (!tbody) return;
-    
-    const filtered = query 
-        ? suggestions.filter(s => 
-            String(s.Detailed_Comm_code || '').toLowerCase().includes(query.toLowerCase()) ||
-            String(s.Detailed_Comm_Name || '').toLowerCase().includes(query.toLowerCase()) ||
-            String(s.Abstract_Comm_Name || '').toLowerCase().includes(query.toLowerCase())
-          )
-        : suggestions;
-    
+
+    const suggestionsDict = pendingCommodityData.suggestions || {};
+    let list = Array.isArray(suggestionsDict[targetCommodity]) ? suggestionsDict[targetCommodity] : [];
+
+    if (query) {
+        const q = query.toLowerCase();
+        list = list.filter(s =>
+            String(s.Commodity || '').toLowerCase().includes(q) ||
+            String(s.Detailed_Comm_code || '').toLowerCase().includes(q) ||
+            String(s.Detailed_Comm_Name || '').toLowerCase().includes(q) ||
+            String(s.Abstract_Comm_code || '').toLowerCase().includes(q) ||
+            String(s.Abstract_Comm_Name || '').toLowerCase().includes(q)
+        );
+    }
+
     tbody.innerHTML = '';
-    filtered.forEach(s => {
+
+    if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:1rem;text-align:center;color:var(--text-muted);">No suggestions found &mdash; use manual entry below</td></tr>';
+        return;
+    }
+
+    list.forEach(s => {
         const tr = document.createElement('tr');
-        tr.style.cssText = 'border-bottom: 1px solid var(--border); cursor: pointer;';
+        tr.style.cssText = 'border-bottom:1px solid var(--border);';
         tr.onmouseover = () => tr.style.background = 'rgba(255,255,255,0.05)';
         tr.onmouseout = () => tr.style.background = '';
-        
-        const assignBtn = targetCommodity 
-            ? `<button onclick="assignCommodity('${targetCommodity.replace(/'/g, "\\'")}', '${s.Detailed_Comm_code}', '${s.Abstract_Comm_code}')" style="padding: 3px 10px; font-size: 0.75rem; border: none; background: var(--accent); color: white; border-radius: 4px; cursor: pointer;">Assign</button>`
-            : `<span style="color: var(--text-muted); font-size: 0.75rem;">Select a commodity first</span>`;
-        
-        tr.innerHTML = `
-            <td style="padding: 8px;">${s.Detailed_Comm_code || ''}</td>
-            <td style="padding: 8px;">${s.Detailed_Comm_Name || ''}</td>
-            <td style="padding: 8px;">${s.Abstract_Comm_code || ''}</td>
-            <td style="padding: 8px;">${s.Abstract_Comm_Name || ''}</td>
-            <td style="padding: 8px;">${assignBtn}</td>
-        `;
+
+        const scoreText = (s.score != null)
+            ? '<span style="font-size:0.7rem;color:var(--text-muted);">' + Math.round(s.score * 100) + '%</span>'
+            : '';
+
+        // Safe escape for onclick attribute
+        function esc(v) {
+            return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        }
+
+        tr.innerHTML =
+            '<td style="padding:6px 8px;">' + (s.Commodity || '') + '</td>' +
+            '<td style="padding:6px 8px;">' + (s.Detailed_Comm_code || '') + '</td>' +
+            '<td style="padding:6px 8px;">' + (s.Detailed_Comm_Name || '') + '</td>' +
+            '<td style="padding:6px 4px;">' + scoreText + '</td>' +
+            '<td style="padding:6px 8px;">' +
+                '<button onclick="assignCommodity(\'' + esc(targetCommodity) + '\',\'' + esc(s.Detailed_Comm_code) + '\',\'' + esc(s.Abstract_Comm_code) + '\',\'' + esc(s.Commodity) + '\',\'' + esc(s.Detailed_Comm_Name) + '\')" ' +
+                'style="padding:3px 10px;font-size:0.75rem;border:none;background:var(--accent,#6366f1);color:#fff;border-radius:4px;cursor:pointer;">Assign</button>' +
+            '</td>';
         tbody.appendChild(tr);
     });
-    
-    if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-muted);">No suggestions found</td></tr>`;
+}
+
+/**
+ * Assigns a commodity code to a trip purpose string.
+ */
+function assignCommodity(commodityStr, detailedCode, abstractCode, dbCommodityName, detailedName) {
+    commodityMapping[commodityStr] = {
+        Commodity: dbCommodityName || '',
+        Detailed_Comm_code: detailedCode,
+        Detailed_Comm_Name: detailedName || '',
+        Abstract_Comm_code: abstractCode
+    };
+
+    // Update left pane item inline
+    const listContainer = document.getElementById('commodity-list-container');
+    if (listContainer) {
+        const item = listContainer.querySelector('[data-comm="' + CSS.escape(commodityStr) + '"]');
+        if (item) {
+            item.style.border = '1px solid var(--success,#22c55e)';
+            item.style.background = 'rgba(34,197,94,0.08)';
+            item.style.outline = 'none';
+        }
+    }
+
+    // Update pending count
+    const unresolved = pendingCommodityData.unresolved || [];
+    const unassignedCount = unresolved.filter(c => !commodityMapping[c]).length;
+    const countEl = document.getElementById('commodity-pending-count');
+    if (countEl) countEl.textContent = unassignedCount;
+
+    // Auto-advance to next unassigned
+    const nextUnassigned = unresolved.find(c => !commodityMapping[c]);
+    if (nextUnassigned) {
+        setTimeout(() => selectCommodityItem(nextUnassigned), 80);
+    } else {
+        // All done - refresh left pane to show all green
+        renderCommodityModal();
     }
 }
 
 /**
- * Assigns a commodity code to a trip purpose value.
+ * Assigns a manually typed commodity code.
  */
-function assignCommodity(commodityStr, detailedCode, abstractCode) {
-    commodityMapping[commodityStr] = { 
-        Detailed_Comm_code: detailedCode, 
-        Abstract_Comm_code: abstractCode 
-    };
-    // Re-render the modal to reflect the new assignment
-    renderCommodityModal();
-    // Keep the selection highlighted
-    const selEl = document.getElementById('commodity-current-selection');
-    if (selEl) selEl.textContent = `→ "${commodityStr}"`;
-    const searchInput = document.getElementById('commodity-search-input');
-    const query = searchInput?.value || '';
-    renderSuggestions(pendingCommodityData.suggestions || [], commodityStr, query);
+function assignManualCommodityCode() {
+    if (!_selectedCommodity) { alert('Please select a commodity from the left pane first.'); return; }
+    const detEl = document.getElementById('commodity-manual-detailed');
+    const absEl = document.getElementById('commodity-manual-abstract');
+    const detCode = detEl ? detEl.value.trim() : '';
+    const absCode = absEl ? absEl.value.trim() : '';
+    if (!detCode) { alert('Please enter a Detailed Code (COMMODITY_CODE_1_28).'); return; }
+    assignCommodity(_selectedCommodity, detCode, absCode);
+    if (detEl) detEl.value = '';
+    if (absEl) absEl.value = '';
 }
 
 /**
- * Closes the commodity modal.
- * @param {boolean} goBack - If true, re-opens preliminary analysis modal (Back button).
+ * Closes the commodity coding modal.
  */
-function closeCommodityModal(goBack = false) {
+function closeCommodityModal(goBack) {
     const modal = document.getElementById('commodity-modal');
     if (modal) modal.style.display = 'none';
-    if (goBack) {
-        // For now just close; user can navigate back manually
-        console.log("Commodity modal closed (Back)");
-    }
+    _selectedCommodity = null;
 }
 
 /**
- * Proceeds from commodity modal to the next step (Survey Mapping or OD Coding).
- * Called by the "Next" button in the commodity modal.
+ * Finishes commodity coding and proceeds to the next step.
+ * Called by the "Finish & Continue" button.
  */
 function proceedToSurveyMapping() {
     closeCommodityModal();
@@ -3427,9 +3616,9 @@ function proceedToSurveyMapping() {
     if (typeof afterConfirm === 'function') {
         afterConfirm();
     }
-    // else: new project flow - no additional step needed; user can proceed via main UI
-}
+    // else: new project — user proceeds via "Start OD Coding" on the setup page
 
+}
 // SETUP PLACEHOLDERS
 function setupSurveyLocations() {
     const plazas = new Set();
@@ -3526,11 +3715,11 @@ function startPickingPlaza(name) {
 }
 
 function applyPlazaMapping() {
-    // Re-render markers if dataset is loaded
+    closeSurveyModal();
+    // Now that survey is closed, trigger suggestion fetch for the current place
     if (unmatchedPlaces.length > 0) {
         renderCurrentPlace();
     }
-    closeSurveyModal();
     alert("Plaza locations updated on map.");
 }
 

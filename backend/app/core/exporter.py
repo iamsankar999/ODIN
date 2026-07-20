@@ -230,6 +230,23 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                 return clean_zone_export(frontend_zone)
             return clean_zone_export(spatial.get('zone', ''))
             
+    def get_coords(val, plaza_name):
+        if pd.isna(val): return "", ""
+        val_clean = str(val).strip().lower()
+        if val_clean not in orig_key_mapping: return "", ""
+        orig_k = orig_key_mapping[val_clean]
+        p_name = str(plaza_name).strip() if pd.notna(plaza_name) else ""
+        entry = mapping[orig_k]
+        
+        if isinstance(entry, dict) and any(isinstance(v, dict) for v in entry.values()):
+            if p_name in entry:
+                return entry[p_name].get('lat', ''), entry[p_name].get('lng', '')
+            elif "__all__" in entry:
+                return entry["__all__"].get('lat', ''), entry["__all__"].get('lng', '')
+            return "", ""
+        else:
+            return entry.get('lat', ''), entry.get('lng', '')
+
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         if original_excel_bytes:
             xl = pd.ExcelFile(BytesIO(original_excel_bytes))
@@ -242,8 +259,7 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                 df_raw = xl.parse("Auto_OD_input")
                 cols_to_keep = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", 
-                    "COMMODITY_TRIP_PURPOSE", "DIRECTION", "PLAZA_NAME", 
-                    "COMMODITY_CODE_1_28", "COMMODITY_CODE_1_17"
+                    "COMMODITY_TRIP_PURPOSE", "DIRECTION", "PLAZA_NAME"
                 ]
                 
                 plaza_col = "PLAZA_NAME" 
@@ -253,27 +269,40 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                         break
                         
                 # Apply commodity codes: DB auto-matches + user manual assignments
-                from app.core.commodity_matcher import exact_match_commodity
+                from app.core.commodity_matcher import exact_match_commodity, get_detailed_name_for_code
                 comm_map = commodity_mapping or {}
                 
                 def _get_comm_code(row):
-                    """Returns (detailed_code, abstract_code) for a row."""
-                    # If already coded from DB auto-match (in the excel file), keep it
+                    """Returns (detailed_code, abstract_code, det_name, db_comm_name) for a row."""
+                    purp_clean = str(row.get('COMMODITY_TRIP_PURPOSE', '')).strip()
+                    # Try user manual assignment first
+                    if purp_clean and purp_clean in comm_map:
+                        det = str(comm_map[purp_clean].get('Detailed_Comm_code', ''))
+                        abs_c = str(comm_map[purp_clean].get('Abstract_Comm_code', ''))
+                        det_nm = str(comm_map[purp_clean].get('Detailed_Comm_Name', ''))
+                        db_nm = str(comm_map[purp_clean].get('Commodity', ''))
+                        if not det_nm and det:
+                            det_nm = get_detailed_name_for_code(det)
+                        return det, abs_c, det_nm, db_nm
+                    
+                    # If already coded from DB auto-match (in the excel file)
                     code_28 = row.get('COMMODITY_CODE_1_28', '')
                     code_17 = row.get('COMMODITY_CODE_1_17', '')
                     if code_28 and str(code_28).strip() and str(code_28).strip() != 'nan':
-                        return str(code_28).strip(), str(code_17).strip() if code_17 else ''
-                    # Try user manual assignment
-                    purpose = row.get('COMMODITY_TRIP_PURPOSE', '')
-                    if purpose and str(purpose).strip():
-                        purp_clean = str(purpose).strip()
-                        if purp_clean in comm_map:
-                            return str(comm_map[purp_clean].get('Detailed_Comm_code', '')), str(comm_map[purp_clean].get('Abstract_Comm_code', ''))
-                        # Try DB auto-match (case-insensitive)
+                        det_code = str(code_28).strip()
+                        abs_code = str(code_17).strip() if code_17 else ''
                         db_match = exact_match_commodity(purp_clean)
                         if db_match:
-                            return str(db_match.get('Detailed_Comm_code', '')), str(db_match.get('Abstract_Comm_code', ''))
-                    return '', ''
+                            return det_code, abs_code, str(db_match.get('Detailed_Comm_Name', '')), str(db_match.get('Commodity', ''))
+                        return det_code, abs_code, get_detailed_name_for_code(det_code), ''
+                        
+                    # Try DB auto-match directly (fallback)
+                    if purp_clean:
+                        db_match = exact_match_commodity(purp_clean)
+                        if db_match:
+                            return str(db_match.get('Detailed_Comm_code', '')), str(db_match.get('Abstract_Comm_code', '')), str(db_match.get('Detailed_Comm_Name', '')), str(db_match.get('Commodity', ''))
+                            
+                    return '', '', '', ''
 
                 out_data = []
                 for _, row in df_raw.iterrows():
@@ -285,22 +314,60 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                             out_row[c] = row.get(c, "")
                     
                     # Apply commodity codes
-                    det_code, abs_code = _get_comm_code(row)
-                    out_row['COMMODITY_CODE_1_28'] = det_code
-                    out_row['COMMODITY_CODE_1_17'] = abs_code
+                    det_code, abs_code, det_name, db_comm_name = _get_comm_code(row)
+                    out_row['Detailed_Comm_code'] = det_code
+                    out_row['Detailed_Comm_Name'] = det_name
+                    
+                    # Apply Coords
+                    o_val = row.get('ORIGIN', '')
+                    d_val = row.get('DESTINATION', '')
+                    p_val = row.get(plaza_col, '')
+                    
+                    o_lat, o_lng = get_coords(o_val, p_val)
+                    d_lat, d_lng = get_coords(d_val, p_val)
+                    
+                    out_row['ORIGIN_COORD'] = f"{o_lat},{o_lng}" if o_lat and o_lng else ""
+                    out_row['DESTINATION_COORD'] = f"{d_lat},{d_lng}" if d_lat and d_lng else ""
+                    
                     out_data.append(out_row)
                     
                 df_out = pd.DataFrame(out_data)
                 
                 final_cols = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", "COMMODITY_TRIP_PURPOSE", 
-                    "DIRECTION", "PLAZA_NAME", "COMMODITY_CODE_1_28", "COMMODITY_CODE_1_17"
+                    "DIRECTION", "PLAZA_NAME", "Detailed_Comm_code", "Detailed_Comm_Name",
+                    "ORIGIN_COORD", "DESTINATION_COORD"
                 ]
                 df_out = df_out[[c for c in final_cols if c in df_out.columns]]
                 df_out.to_excel(writer, sheet_name="Resolved_rawOD", index=False)
                 
+                # ---- Commodity_code summary sheet ----
+                # Build unique list of COMMODITY_TRIP_PURPOSE with their assigned codes/names
+                seen_purposes = {}
+                for _, row in df_raw.iterrows():
+                    purpose = row.get('COMMODITY_TRIP_PURPOSE', '')
+                    if not purpose or str(purpose).strip() == '' or str(purpose).strip() == 'nan':
+                        continue
+                    purp_clean = str(purpose).strip()
+                    if purp_clean in seen_purposes:
+                        continue
+                    det_code, abs_code, det_name, db_comm_name = _get_comm_code(row)
+                    
+                    seen_purposes[purp_clean] = {
+                        'COMMODITY_TRIP_PURPOSE': purp_clean,
+                        'Matched_Commodity_DB': db_comm_name,
+                        'Detailed_Comm_code': det_code,
+                        'Detailed_Comm_Name': det_name,
+                    }
+                
+                if seen_purposes:
+                    df_comm_code = pd.DataFrame(list(seen_purposes.values()))
+                    df_comm_code = df_comm_code.sort_values('COMMODITY_TRIP_PURPOSE').reset_index(drop=True)
+                    df_comm_code.to_excel(writer, sheet_name='Commodity_code', index=False)
+                
         df.to_excel(writer, sheet_name='Resolved_Places', index=False)
     return output.getvalue()
+
 
 def generate_survey_locations_excel(plaza_mapping: Dict[str, Any]) -> bytes:
     """Creates a simple excel file containing all verified survey location coordinates."""

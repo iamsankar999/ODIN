@@ -2,7 +2,7 @@
 
 **ODIN** is a professional-grade geospatial validation and analytical platform designed to automate the complex process of Origin-Destination (OD) data coding. It transforms raw, manually-surveyed place names into validated, geocoded, and zone-mapped datasets.
 
-![Version](https://img.shields.io/badge/version-v2.5.9.1-blue.svg)
+![Version](https://img.shields.io/badge/version-v2.6.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-green.svg)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet.js-orange.svg)
@@ -140,6 +140,12 @@ The system parses multiple sheets from the uploaded Excel:
 ---
 
 ## 📋 Changelog
+
+### v2.6.0 — 2026-07-20
+- **Feature**: Overhauled Commodity Coding workflow. Autosave now captures user-assigned commodity codes, ensuring no progress is lost across sessions.
+- **Feature**: `Resolved_rawOD` export now automatically populates `Detailed_Comm_code` and `Detailed_Comm_Name` for manually assigned commodities, retrieving official names directly from the DB.
+- **Feature**: Appended `ORIGIN_COORD` and `DESTINATION_COORD` columns to `Resolved_rawOD` sheet based on the resolved spatial mapping.
+- **Fix**: Corrected a bug where `Commodity_code` summary sheet was missing `Matched_Commodity_DB` and `Detailed_Comm_Name` for user-entered assignments.
 
 ### v2.5.9.1 — 2026-07-02 (Patch)
 - **Fix**: Resolved `ReferenceError: pa_COMMODITIES_ABSTRACT is not defined` crash that prevented exports in **Place Assign** mode.

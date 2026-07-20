@@ -32,8 +32,8 @@ def get_reference_dictionary() -> tuple:
         csv_path = os.path.join(DATABASE_DIR, "unique_names.csv")
         if os.path.exists(csv_path):
             try:
-                # Read CSV, assume 'name' column exists or take first column
-                df = pd.read_csv(csv_path)
+                # Read CSV, assume 'name' column exists or take first column. Skip badly formatted lines.
+                df = pd.read_csv(csv_path, on_bad_lines='skip')
                 col_name = 'name' if 'name' in df.columns else df.columns[0]
                 
                 # Filter out strings and dropna
