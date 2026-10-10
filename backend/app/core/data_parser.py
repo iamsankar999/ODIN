@@ -56,16 +56,36 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
     print(f"Parsed Auto_OD_input. Shape: {df_main.shape}")
     print(f"Columns: {df_main.columns.tolist()}")
     
+    # ── Commodity code lists: load from Commodity_unicode.csv (authoritative DB) ──
     ca_codes_abstract = []
-    if "CA_code_ABSTRACT" in xl.sheet_names:
-        ca_codes_abstract = clean_df(xl.parse("CA_code_ABSTRACT")).to_dict(orient="records")
-    elif "CA_code" in xl.sheet_names:
-        # Fallback for older files
-        ca_codes_abstract = clean_df(xl.parse("CA_code")).to_dict(orient="records")
-        
     ca_codes_detailed = []
-    if "CA_code_DETAILED" in xl.sheet_names:
-        ca_codes_detailed = clean_df(xl.parse("CA_code_DETAILED")).to_dict(orient="records")
+    try:
+        import os as _os, csv as _csv
+        _db = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', '..', 'database', 'Commodity_unicode.csv'))
+        if _os.path.exists(_db):
+            _seen_abs = {}
+            with open(_db, newline='', encoding='utf-8') as _f:
+                for _row in _csv.DictReader(_f):
+                    _det = _row.get('Detailed_Comm_code', '').strip()
+                    _det_nm = _row.get('Detailed_Comm_Name', '').strip()
+                    _abs = _row.get('Abstract_Comm_code', '').strip()
+                    _abs_nm = _row.get('Abstract_Comm_Name', '').strip()
+                    if _det:
+                        ca_codes_detailed.append({'Detailed_Comm_code': _det, 'Detailed_Comm_Name': _det_nm})
+                    if _abs and _abs not in _seen_abs:
+                        _seen_abs[_abs] = True
+                        ca_codes_abstract.append({'Abstract_Comm_code': _abs, 'Abstract_Comm_Name': _abs_nm})
+    except Exception as _e:
+        print(f'Warning: Commodity_unicode.csv load failed: {_e}')
+    # Fallback to Excel sheets if DB load failed
+    if not ca_codes_abstract:
+        if 'CA_code_ABSTRACT' in xl.sheet_names:
+            ca_codes_abstract = clean_df(xl.parse('CA_code_ABSTRACT')).to_dict(orient='records')
+        elif 'CA_code' in xl.sheet_names:
+            ca_codes_abstract = clean_df(xl.parse('CA_code')).to_dict(orient='records')
+    if not ca_codes_detailed:
+        if 'CA_code_DETAILED' in xl.sheet_names:
+            ca_codes_detailed = clean_df(xl.parse('CA_code_DETAILED')).to_dict(orient='records')
         
     # OD_code parsing remains for Place assign mode
 

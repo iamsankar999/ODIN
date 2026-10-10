@@ -514,7 +514,8 @@ async def export_pa_progress(
     shapefile_zip: UploadFile = File(None),
     geojson_file: UploadFile = File(None),
     plaza_mapping: Optional[str] = Form(None),
-    project_config: Optional[str] = Form(None)
+    project_config: Optional[str] = Form(None),
+    components: Optional[str] = Form(None)
 ):
     try:
         from app.core.exporter import update_zones_with_shapefile, generate_progress_excel, generate_survey_locations_excel
@@ -551,7 +552,12 @@ async def export_pa_progress(
             mapping = json.dumps(mapping_dict)
 
         # include_zone=True so Zone Number column appears in Place Assign Resolved_Places
-        resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes, include_zone=True)
+        components_list = json.loads(components) if components else []
+        geojson_bytes_for_export = None
+        if geojson_file is not None:
+            # Re-read the geojson bytes for the exporter (already consumed above)
+            pass
+        resolved_xlsx = generate_progress_excel(mapping_dict, gdf, excel_bytes, include_zone=True, components=components_list)
         survey_xlsx = generate_survey_locations_excel(plaza_mapping_dict)
         
         zip_buffer = BytesIO()
@@ -563,6 +569,12 @@ async def export_pa_progress(
             zip_file.writestr("resolutions.json", mapping)
             if plaza_mapping:
                 zip_file.writestr("plaza_mapping.json", plaza_mapping)
+            if project_config:
+                zip_file.writestr("project_config.json", project_config)
+            if geojson_file is not None:
+                await geojson_file.seek(0)
+                g_bytes = await geojson_file.read()
+                zip_file.writestr("zoning_scheme.geojson", g_bytes)
                 
         zip_buffer.seek(0)
         

@@ -377,10 +377,10 @@ function selectModeForSetup(mode) {
     switchView('view-setup');
 
     // ── Place Assign: Adapt wizard upload buttons ──
-    const shpBtn   = document.getElementById('wizard-shp-btn');
-    const odBtn    = document.getElementById('wizard-od-btn');
+    const shpBtn = document.getElementById('wizard-shp-btn');
+    const odBtn = document.getElementById('wizard-od-btn');
     const shpInput = document.getElementById('wizard-shapefile-upload');
-    const odInput  = document.getElementById('wizard-od-upload');
+    const odInput = document.getElementById('wizard-od-upload');
     const openProjectPanel = document.getElementById('panel-open-project');
 
     if (mode === 'Place assign') {
@@ -434,17 +434,17 @@ async function startTask() {
         const unresolvedTotal = (pendingCommodityData.unresolved || []).length;
         if (currentMode === "Zone assign" && unresolvedTotal > 0) {
             hideLoading();
-            
+
             // Set afterConfirm to resume startTask
             pendingCommodityData.afterConfirm = async () => {
                 showLoading(`Resuming ${currentMode} Task...`);
                 await finalizeStartTask();
             };
-            
+
             openCommodityModal();
             return; // Stop execution here; it will resume via afterConfirm
         }
-        
+
         await finalizeStartTask();
     } catch (err) {
         console.error("Task start failed:", err);
@@ -493,6 +493,19 @@ async function finalizeStartTask() {
         switchView('view-main');
         selectMode(currentMode); // This function handles the survey vs analytics toggle internally
 
+        // FIX #4: If project was loaded with unmapped plazas, show survey modal immediately
+        if (window._pendingUnmappedPlazas && window._pendingUnmappedPlazas.length > 0) {
+            const names = window._pendingUnmappedPlazas;
+            window._pendingUnmappedPlazas = null;
+            // Small delay to let the map render first
+            setTimeout(() => {
+                const allPlazaNames = Object.keys(plazaMapping);
+                renderSurveyModal(allPlazaNames);
+                document.getElementById('survey-modal').classList.add('active');
+                alert(`The following survey location(s) have no coordinates and must be mapped before continuing:\n\n• ${names.join('\n• ')}`);
+            }, 500);
+        }
+
         hideLoading();
         // Trigger initial auto-save to wrap original files and current progress state immediately
         triggerAutoSave();
@@ -531,7 +544,7 @@ async function handleProjectZipUpload(input) {
     const file = input.files ? input.files[0] : (input.target ? input.target.files[0] : input);
     if (!file) return;
     projectZipFile = file;
-    
+
     const zipBtn = document.getElementById('project-zip-btn');
     if (zipBtn) {
         zipBtn.classList.remove("loaded", "not-loaded");
@@ -550,12 +563,12 @@ async function handleProjectZipUpload(input) {
             if (zipBtn.childNodes.length > 0) zipBtn.childNodes[0].textContent = "Project ZIP Loaded ✓";
             else zipBtn.textContent = "Project ZIP Loaded ✓";
         }
-        
+
         const zipStatus = document.getElementById('zip-status');
         if (zipStatus) {
             zipStatus.innerHTML = '<span id="status-zip" class="status-success" style="color: #4ade80;">✓</span> <span style="color: #4ade80;">ZIP Loaded</span>';
         }
-        
+
         projectZipParsed = true;
         showOpenProjectUserInfo();
         checkWizardCompletion();
@@ -667,7 +680,7 @@ async function performAutoSave() {
     // 1. Mapping Progress
     zip.file("resolutions.json", JSON.stringify(resolvedPlaces));
     zip.file("plaza_mapping.json", JSON.stringify(plazaMapping));
-    zip.file("project_config.json", JSON.stringify({ 
+    zip.file("project_config.json", JSON.stringify({
         mode: currentMode,
         users: allUsers,
         comm_abstract: COMMODITIES_ABSTRACT,
@@ -749,6 +762,19 @@ async function parseProjectZip(file) {
         await handleFileUpload(odBlob, true);
     } else {
         throw new Error("Invalid project bundle: Could not find an Excel (.xlsx) dataset.");
+    }
+
+    // FIX #4: After loading project, check if any survey location is unmapped.
+    // If so, redirect user to survey mapping window immediately.
+    if (currentMode !== 'Place assign') {
+        const unmappedPlazas = Object.entries(plazaMapping)
+            .filter(([, v]) => !v || v.lat === null || v.lat === undefined)
+            .map(([k]) => k);
+        if (unmappedPlazas.length > 0) {
+            console.warn('Unmapped survey locations found after project load:', unmappedPlazas);
+            // Mark so startTask() knows to redirect
+            window._pendingUnmappedPlazas = unmappedPlazas;
+        }
     }
 }
 
@@ -833,31 +859,29 @@ window.initMap = function () {
         const lat = e.latLng.lat();
         const lng = e.latLng.lng();
 
-        // Handle Plaza Picking if active
+        // Handle Plaza Picking if active — NEW: show confirm panel instead of immediately assigning
         if (pickingPlaza) {
-            plazaMapping[pickingPlaza] = { lat, lng };
+            // Place a temp marker at the clicked location
+            if (map.tempMarker) map.tempMarker.setMap(null);
+            map.tempMarker = new google.maps.Marker({
+                position: { lat, lng }, map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE, scale: 8,
+                    fillColor: '#818cf8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2
+                },
+                animation: google.maps.Animation.DROP
+            });
 
-            // Update both Modal (if exists) and Left-Pane list
-            const rowIdModal = `plaza-row-${pickingPlaza.replace(/\s+/g, '-')}`;
-            const rowModal = document.getElementById(rowIdModal);
-            if (rowModal) {
-                rowModal.classList.add('mapped');
-                const iModal = rowModal.querySelector('input');
-                if (iModal) iModal.value = "Mapped ✓";
+            // Store pending pick and show the confirm panel
+            window._mapPickPending = { lat, lng };
+            const confirmPanel = document.getElementById('map-pick-confirm-panel');
+            const coordEl = document.getElementById('map-pick-coords');
+            const nameEl = document.getElementById('map-pick-plaza-name');
+            if (confirmPanel) {
+                if (nameEl) nameEl.textContent = pickingPlaza;
+                if (coordEl) coordEl.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+                confirmPanel.style.display = 'flex';
             }
-
-            // Place a green marker at the picked location
-            addPlazaVerificationMarker(pickingPlaza, { lat, lng });
-
-            // Update Left-Pane View
-            renderPlazaMappingView();
-
-            const pickedName = pickingPlaza;
-            pickingPlaza = null;
-            const btns = document.querySelectorAll('.plaza-pick-btn, .plaza-mapping-btn');
-            btns.forEach(b => b.classList.remove('active'));
-
-            alert(`Survey location "${pickedName}" assigned successfully!`);
             return;
         }
 
@@ -1019,20 +1043,20 @@ function renderPreliminaryAnalysis(data) {
     const container = document.getElementById('preliminary-analysis-container');
     if (!container) return;
     container.innerHTML = '';
-    
+
     if (!data || Object.keys(data).length === 0) {
         container.innerHTML = `<div style="text-align: center; color: var(--text-secondary);">No preliminary data available</div>`;
         return;
     }
-    
+
     const vehicles = ['CAR', 'MB', 'GB', 'ML', 'LGV', '2T', '3T', '4T', '5T', '6T'];
-    
+
     for (const plaza in data) {
         const directions = data[plaza];
-        
+
         const section = document.createElement('div');
         section.className = 'plaza-analysis-section';
-        
+
         const heading = document.createElement('h4');
         heading.style.marginBottom = '1rem';
         heading.style.color = 'var(--text-primary)';
@@ -1040,13 +1064,13 @@ function renderPreliminaryAnalysis(data) {
         heading.style.paddingBottom = '0.5rem';
         heading.textContent = plaza;
         section.appendChild(heading);
-        
+
         const tableContainer = document.createElement('div');
         tableContainer.className = 'table-container';
-        
+
         const table = document.createElement('table');
         table.className = 'data-table';
-        
+
         const thead = document.createElement('thead');
         let theadHtml = `<tr><th style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.1);">Direction</th>`;
         vehicles.forEach(v => {
@@ -1055,31 +1079,31 @@ function renderPreliminaryAnalysis(data) {
         theadHtml += `<th style="background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.1);">Total</th></tr>`;
         thead.innerHTML = theadHtml;
         table.appendChild(thead);
-        
+
         const tbody = document.createElement('tbody');
-        
+
         for (const dir in directions) {
             const counts = directions[dir];
             let rowHtml = `<td>${dir}</td>`;
             let total = 0;
-            
+
             vehicles.forEach(v => {
                 const count = counts[v] || 0;
                 total += count;
                 rowHtml += `<td>${count}</td>`;
             });
-            
+
             rowHtml += `<td><strong>${total}</strong></td>`;
-            
+
             const tr = document.createElement('tr');
             tr.innerHTML = rowHtml;
             tbody.appendChild(tr);
         }
-        
+
         table.appendChild(tbody);
         tableContainer.appendChild(table);
         section.appendChild(tableContainer);
-        
+
         container.appendChild(section);
     }
 }
@@ -1174,8 +1198,16 @@ async function handleAppendDataUpload(input) {
             }
         });
 
+        // FIX #3: Sort all unmatched places descending by total_occurrences after append
+        allUnmatchedPlaces.sort((a, b) => (b.total_occurrences || 0) - (a.total_occurrences || 0));
+
         filterPlacesByUser();
         updateNavigatorDisplay();
+        // FIX #5: Refresh vehicle + commodity analytics tables immediately after append
+        if (unmatchedPlaces.length > 0) {
+            renderVehicleAnalytics();
+            renderCommodityMatrix();
+        }
 
         // Build the continuation action (runs after preliminary analysis or immediately)
         const unresolvedCommodities = result.unresolved_commodities || [];
@@ -1186,7 +1218,7 @@ async function handleAppendDataUpload(input) {
         for (const [comm, match] of Object.entries(autoMatched)) {
             commodityMapping[comm] = match;
         }
-        
+
         const afterPreliminary = () => {
             if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
                 // Commodity coding step before survey mapping
@@ -1296,23 +1328,26 @@ async function handleFileUpload(event, isFromZip = false) {
             }
         });
 
-        // Always parse commodity codes regardless of isFromZip
         if (result.ca_codes_abstract && result.ca_codes_abstract.length > 0) {
+            // Try using Detailed_Comm_code / Detailed_Comm_Name columns from Commodity_unicode DB
+            // The backend sends records with those exact keys when available
             COMMODITIES_ABSTRACT = result.ca_codes_abstract.map(row => {
-                const vals = Object.values(row);
-                return {
-                    code: vals.length > 0 ? vals[0].toString() : '?',
-                    name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
-                };
+                // Prefer Commodity_unicode schema: Abstract_Comm_code + Abstract_Comm_Name
+                const code = row['Abstract_Comm_code'] !== undefined ? String(row['Abstract_Comm_code'])
+                    : row['Detailed_Comm_code'] !== undefined ? String(row['Detailed_Comm_code'])
+                        : String(Object.values(row)[0] || '?');
+                const name = row['Abstract_Comm_Name'] || row['Detailed_Comm_Name']
+                    || (Object.values(row)[1] || 'Unknown Commodity');
+                return { code, name };
             });
         }
         if (result.ca_codes_detailed && result.ca_codes_detailed.length > 0) {
+            // Detailed codes from Commodity_unicode: Detailed_Comm_code + Detailed_Comm_Name
             COMMODITIES_DETAILED = result.ca_codes_detailed.map(row => {
-                const vals = Object.values(row);
-                return {
-                    code: vals.length > 0 ? vals[0].toString() : '?',
-                    name: vals.length > 1 ? vals[1] : 'Unknown Commodity'
-                };
+                const code = row['Detailed_Comm_code'] !== undefined ? String(row['Detailed_Comm_code'])
+                    : String(Object.values(row)[0] || '?');
+                const name = row['Detailed_Comm_Name'] || (Object.values(row)[1] || 'Unknown Commodity');
+                return { code, name };
             });
         }
 
@@ -1365,7 +1400,7 @@ async function handleFileUpload(event, isFromZip = false) {
 
             filterPlacesByUser();
             checkWizardCompletion();
-            
+
             // Store commodity data globally so startTask() can pick it up
             const unresolvedCommodities = result.unresolved_commodities || [];
             const commoditySuggestions = result.commodity_suggestions || {};  // dict: {commodity: [suggestions]}
@@ -1375,7 +1410,7 @@ async function handleFileUpload(event, isFromZip = false) {
             for (const [comm, match] of Object.entries(autoMatched)) {
                 commodityMapping[comm] = match;
             }
-            
+
             if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
                 pendingCommodityData.unresolved = unresolvedCommodities;
                 pendingCommodityData.suggestions = commoditySuggestions;
@@ -1387,14 +1422,14 @@ async function handleFileUpload(event, isFromZip = false) {
                 pendingCommodityData.suggestions = {};
                 pendingCommodityData.autoMatched = {};
             }
-            
+
             // Render Preliminary Analysis if present and in Zone assign mode
             if (result.preliminary_analysis && Object.keys(result.preliminary_analysis).length > 0 && currentMode === "Zone assign") {
                 renderPreliminaryAnalysis(result.preliminary_analysis);
                 const prelimModal = document.getElementById('preliminary-analysis-modal');
                 if (prelimModal) {
                     prelimModal.classList.add('active');
-                    
+
                     // Wire the Continue button: after dismissing prelim, show commodity modal if needed
                     const continueBtn = prelimModal.querySelector('.modal-footer .btn-primary');
                     if (continueBtn) {
@@ -1412,7 +1447,7 @@ async function handleFileUpload(event, isFromZip = false) {
                     }
                 }
             }
-            
+
             // Silent success — user proceeds via setup page buttons
         } else {
             alert(`Upload succeeded, but no unique OD pairs were found (Total records: ${result.total_rows || 0})`);
@@ -1450,16 +1485,16 @@ async function downloadProgress() {
 
     // Add survey location details
     formData.append('plaza_mapping', JSON.stringify(plazaMapping));
-    
+
     // Add project configuration
-    formData.append('project_config', JSON.stringify({ 
+    formData.append('project_config', JSON.stringify({
         mode: currentMode,
         users: allUsers,
         comm_abstract: COMMODITIES_ABSTRACT,
         comm_detailed: COMMODITIES_DETAILED,
         commodity_mapping: commodityMapping
     }));
-    
+
     // Add commodity mapping (user-assigned codes for unresolved commodities)
     formData.append('commodity_mapping', JSON.stringify(commodityMapping));
 
@@ -1856,15 +1891,104 @@ function renderPlazaMappingView() {
 }
 
 function startPickingPlaza(name) {
+    // FIX #2: Use full-screen map pick mode with confirm/back flow instead of alert
     pickingPlaza = name;
     renderPlazaMappingView(); // Update buttons state
-    alert(`Click anywhere on the map to set the location for: ${name}`);
 
-    // Also center map on studying area if we have any prev mapping or just general area
-    if (map && !plazaMapping[name]) {
-        const firstPlaza = Object.values(plazaMapping)[0];
-        if (firstPlaza) map.panTo(firstPlaza);
+    // Show the map pick overlay panel
+    let overlay = document.getElementById('map-pick-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'map-pick-overlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none;';
+        overlay.innerHTML = `
+            <div id="map-pick-banner" style="
+                position:absolute;top:16px;left:50%;transform:translateX(-50%);
+                background:rgba(15,23,42,0.92);backdrop-filter:blur(8px);
+                border:1px solid rgba(99,102,241,0.6);border-radius:12px;
+                padding:12px 24px;display:flex;align-items:center;gap:16px;
+                color:white;font-size:14px;pointer-events:all;
+                box-shadow:0 8px 32px rgba(0,0,0,0.5);
+            ">
+                <span style="color:#a78bfa;">📍</span>
+                <span id="map-pick-label">Click on map to set: <strong>${name}</strong></span>
+                <button id="map-pick-back-btn" onclick="cancelMapPick()" style="
+                    background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);
+                    color:#fca5a5;border-radius:8px;padding:6px 14px;cursor:pointer;
+                    font-size:13px;transition:all 0.2s;
+                ">← Back</button>
+            </div>
+            <div id="map-pick-confirm-panel" style="
+                position:absolute;bottom:32px;left:50%;transform:translateX(-50%);
+                background:rgba(15,23,42,0.95);backdrop-filter:blur(8px);
+                border:1px solid rgba(99,102,241,0.5);border-radius:14px;
+                padding:16px 28px;display:none;align-items:center;gap:16px;
+                color:white;font-size:14px;pointer-events:all;
+                box-shadow:0 8px 32px rgba(0,0,0,0.6);
+            ">
+                <span>📌 Confirm this location for <strong id="map-pick-plaza-name"></strong>?</span>
+                <span id="map-pick-coords" style="color:#86efac;font-family:monospace;"></span>
+                <button onclick="confirmMapPick()" style="
+                    background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);
+                    color:#86efac;border-radius:8px;padding:6px 16px;cursor:pointer;font-size:13px;
+                ">✓ Yes, Confirm</button>
+                <button onclick="retryMapPick()" style="
+                    background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);
+                    color:#fde68a;border-radius:8px;padding:6px 16px;cursor:pointer;font-size:13px;
+                ">↩ Pick Again</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    } else {
+        document.getElementById('map-pick-label').innerHTML = `Click on map to set: <strong>${name}</strong>`;
+        document.getElementById('map-pick-confirm-panel').style.display = 'none';
+        document.getElementById('map-pick-banner').style.display = 'flex';
     }
+    overlay.style.display = 'block';
+    overlay.dataset.currentPlaza = name;
+
+    // Make the overlay pointer-events passthrough except for the banners
+    if (map) {
+        if (plazaMapping[name] && plazaMapping[name].lat) {
+            map.panTo(plazaMapping[name]);
+        } else {
+            const firstMapped = Object.values(plazaMapping).find(v => v && v.lat);
+            if (firstMapped) map.panTo(firstMapped);
+        }
+    }
+
+    // Temporary pending pick storage
+    window._mapPickPending = null;
+}
+
+function cancelMapPick() {
+    pickingPlaza = null;
+    const overlay = document.getElementById('map-pick-overlay');
+    if (overlay) overlay.style.display = 'none';
+    if (map && map.tempMarker) { map.tempMarker.setMap(null); map.tempMarker = null; }
+    renderPlazaMappingView();
+}
+
+function confirmMapPick() {
+    const pending = window._mapPickPending;
+    if (!pending) return;
+    const name = document.getElementById('map-pick-overlay').dataset.currentPlaza;
+    plazaMapping[name] = { lat: pending.lat, lng: pending.lng };
+    addPlazaVerificationMarker(name, { lat: pending.lat, lng: pending.lng });
+    window._mapPickPending = null;
+    pickingPlaza = null;
+    const overlay = document.getElementById('map-pick-overlay');
+    if (overlay) overlay.style.display = 'none';
+    if (map && map.tempMarker) { map.tempMarker.setMap(null); map.tempMarker = null; }
+    renderPlazaMappingView();
+    triggerAutoSave();
+}
+
+function retryMapPick() {
+    window._mapPickPending = null;
+    if (map && map.tempMarker) { map.tempMarker.setMap(null); map.tempMarker = null; }
+    document.getElementById('map-pick-confirm-panel').style.display = 'none';
+    document.getElementById('map-pick-banner').style.display = 'flex';
 }
 
 function setupPlazaAutocomplete(name) {
@@ -1981,7 +2105,7 @@ function filterPlacesByUser() {
     unmatchedPlaces = filtered;
     currentIndex = 0;
     updateNavigatorDisplay();
-    
+
     // Only render if we are actually on the main view AND survey modal is not active
     const mainView = document.getElementById('view-main');
     const surveyModal = document.getElementById('survey-modal');
@@ -2330,10 +2454,10 @@ function renderCommodityMatrix() {
     }
     const commodityList = commodityViewMode === 'detailed' ? COMMODITIES_DETAILED : COMMODITIES_ABSTRACT;
     const codeLookup = {};
-    commodityList.forEach(c => { 
+    commodityList.forEach(c => {
         // Ensure robust code matching by safely converting string/float/int keys
         const clean = parseInt(parseFloat(c.code)).toString();
-        codeLookup[clean] = c.name; 
+        codeLookup[clean] = c.name;
     });
 
     const vehicleCols = ['ML', 'LGV', '2T', '3T', '4T', '5T', '6T'];
@@ -2830,7 +2954,6 @@ async function renderCurrentPlace() {
     const matrix = commodityViewMode === 'detailed' ? place.analytics.commodityMatrixDetailed : place.analytics.commodityMatrixAbstract;
     renderCommodityMatrix(matrix);
 
-
     // If suggestions haven't been fetched yet for this place, fetch them lazily
     if (!place.suggestions || place.suggestions.length === 0) {
         // Show loading state for map/suggestions implicitly by clearing old markers
@@ -3282,9 +3405,9 @@ function toggleReviewDropdown() {
             editBtn.className = 'btn btn-sm btn-outline';
             editBtn.style.cssText = 'padding:1px 6px; font-size:0.6rem; height:18px; line-height:1;';
             editBtn.textContent = 'Edit';
-            editBtn.onclick = (e) => { 
-                e.stopPropagation(); 
-                editResolvedPlace(origName); 
+            editBtn.onclick = (e) => {
+                e.stopPropagation();
+                editResolvedPlace(origName);
             };
 
             nameHeader.appendChild(nameSpan);
@@ -3537,8 +3660,8 @@ function renderSuggestions(targetCommodity, query) {
             '<td style="padding:6px 8px;">' + (s.Detailed_Comm_Name || '') + '</td>' +
             '<td style="padding:6px 4px;">' + scoreText + '</td>' +
             '<td style="padding:6px 8px;">' +
-                '<button onclick="assignCommodity(\'' + esc(targetCommodity) + '\',\'' + esc(s.Detailed_Comm_code) + '\',\'' + esc(s.Abstract_Comm_code) + '\',\'' + esc(s.Commodity) + '\',\'' + esc(s.Detailed_Comm_Name) + '\')" ' +
-                'style="padding:3px 10px;font-size:0.75rem;border:none;background:var(--accent,#6366f1);color:#fff;border-radius:4px;cursor:pointer;">Assign</button>' +
+            '<button onclick="assignCommodity(\'' + esc(targetCommodity) + '\',\'' + esc(s.Detailed_Comm_code) + '\',\'' + esc(s.Abstract_Comm_code) + '\',\'' + esc(s.Commodity) + '\',\'' + esc(s.Detailed_Comm_Name) + '\')" ' +
+            'style="padding:3px 10px;font-size:0.75rem;border:none;background:var(--accent,#6366f1);color:#fff;border-radius:4px;cursor:pointer;">Assign</button>' +
             '</td>';
         tbody.appendChild(tr);
     });
@@ -3665,7 +3788,7 @@ function renderSurveyModal(plazas) {
                        value="${isMapped ? 'Mapped ✓' : ''}">
             </div>
             <button class="plaza-pick-btn ${pickingPlaza === name ? 'active' : ''}" 
-                    onclick="startPlazaPick('${name}')" title="Pick from map">
+                    onclick="startPickingPlaza('${name}')" title="Pick from map">
                 +
             </button>
         `;
@@ -3685,33 +3808,33 @@ function renderSurveyModal(plazas) {
                 };
                 row.classList.add('mapped');
                 input.value = "Mapped ✓";
+                triggerAutoSave();
+            }
+        });
+
+        // FIX #3: Handle direct lat,lng entry in Survey Modal
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const val = input.value.trim();
+                const coordMatch = val.match(/^\s*(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)\s*$/);
+                if (coordMatch) {
+                    const lat = parseFloat(coordMatch[1]);
+                    const lng = parseFloat(coordMatch[2]);
+                    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+                        const pos = { lat, lng };
+                        plazaMapping[name] = pos;
+                        row.classList.add('mapped');
+                        input.value = "Mapped ✓";
+                        if (map) { map.panTo(pos); map.setZoom(15); }
+                        triggerAutoSave();
+                    } else {
+                        alert('Invalid coordinates. Latitude must be -90 to 90, longitude -180 to 180.');
+                    }
+                }
             }
         });
     });
-}
-
-function startPickingPlaza(name) {
-    pickingPlaza = name;
-
-    // Update Left-Pane View buttons state
-    renderPlazaMappingView();
-
-    // Update Modal buttons state (if modal is open)
-    const btns = document.querySelectorAll('.plaza-pick-btn');
-    btns.forEach(b => b.classList.remove('active'));
-    // Note: event might not be defined if called from pane, so we use selectors instead
-
-    alert(`Picking mode active for "${name}". \nPlease click a location on the map to assign it to this plaza.`);
-
-    // Center map on existing mapping or general area
-    if (map) {
-        if (plazaMapping[name]) {
-            map.panTo(plazaMapping[name]);
-        } else {
-            const firstPlaza = Object.values(plazaMapping)[0];
-            if (firstPlaza) map.panTo(firstPlaza);
-        }
-    }
 }
 
 function applyPlazaMapping() {
@@ -3720,6 +3843,7 @@ function applyPlazaMapping() {
     if (unmatchedPlaces.length > 0) {
         renderCurrentPlace();
     }
+    triggerAutoSave();
     alert("Plaza locations updated on map.");
 }
 
@@ -4222,7 +4346,7 @@ function resumeSession() {
         uniquePlazas = session.uniquePlazas || [];
         filesUploaded = session.filesUploaded || { shp: false, od: false };
         currentIndex = session.currentIndex || 0;
-        
+
         if (session.COMMODITIES_ABSTRACT) COMMODITIES_ABSTRACT = session.COMMODITIES_ABSTRACT;
         if (session.COMMODITIES_DETAILED) COMMODITIES_DETAILED = session.COMMODITIES_DETAILED;
 

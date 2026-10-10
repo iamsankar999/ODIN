@@ -33,6 +33,10 @@ let pa_globalTotalOccurrences = 0;
 let pa_pendingReturnToPlaceId = null;
 let pa_zoneBoundaryLayer = null;
 let pa_currentMode = 'Place assign';
+let pa_components = [];
+let pa_activeComponentId = null;
+let pa_selectedZones = new Set();
+let pa_componentLabels = [];
 
 // ── Entry / Exit ──────────────────────────────────────────────────────────────
 
@@ -198,6 +202,9 @@ async function paParseZoneAssignZip(file) {
         if (cfg.users && Array.isArray(cfg.users) && cfg.users.length > 0) {
             pa_allUsers = cfg.users;
         }
+        if (cfg.components && Array.isArray(cfg.components)) {
+            pa_components = cfg.components;
+        }
     }
     if (pa_allUsers.length === 0) pa_allUsers = ['User 1'];
     pa_currentUser = pa_allUsers[0];
@@ -279,6 +286,18 @@ async function paParseZoneAssignZip(file) {
             console.warn('PA: Shapefile upload failed:', e);
         }
     }
+    
+    // 6. Find & upload GeoJSON
+    let gjsonFile = zip.file('zoning_scheme.geojson');
+    if (!gjsonFile) {
+        const candidates = Object.keys(zip.files).filter(n => n.endsWith('.geojson'));
+        if (candidates.length > 0) gjsonFile = zip.file(candidates[0]);
+    }
+    if (gjsonFile) {
+        const gjsonText = await gjsonFile.async('string');
+        pa_geoJsonData = JSON.parse(gjsonText);
+        pa_geoJsonFile = new File([gjsonText], 'zoning_scheme.geojson', { type: 'application/json' });
+    }
 
     paHideLoadingOverlay();
 
@@ -322,52 +341,6 @@ async function paInitMapAndRender() {
             mapTypeControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT }
         });
 
-        // Map click: manual pin placement for current place
-        pa_map.addListener('click', async (e) => {
-            if (pa_pickingPlaza) {
-                const lat = e.latLng.lat(), lng = e.latLng.lng();
-                pa_plazaMapping[pa_pickingPlaza] = { lat, lng };
-                paAddPlazaMarker(pa_pickingPlaza, { lat, lng });
-                const picked = pa_pickingPlaza;
-                pa_pickingPlaza = null;
-                alert(`Survey location "${picked}" placed.`);
-                return;
-            }
-
-            if (!pa_unmatchedPlaces || pa_unmatchedPlaces.length === 0) return;
-            const lat = e.latLng.lat(), lng = e.latLng.lng();
-            if (pa_map.tempMarker) pa_map.tempMarker.setMap(null);
-
-            const place = pa_unmatchedPlaces[pa_currentIndex];
-
-            pa_map.tempMarker = new google.maps.Marker({
-                position: { lat, lng }, map: pa_map,
-                icon: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
-                animation: google.maps.Animation.DROP
-            });
-
-            const zoneData = await paFetchZone(lat, lng);
-            const zoneId = (zoneData && zoneData.zone) ? zoneData.zone : (place.assigned_zone || 'Unknown');
-
-            let nearestName = 'Unknown Location';
-            try {
-                const geocoder = new google.maps.Geocoder();
-                const results = await new Promise((res, rej) => geocoder.geocode({ location: { lat, lng } }, (r, s) => s === 'OK' ? res(r) : rej(s)));
-                for (const r of results) {
-                    for (const comp of r.address_components) {
-                        if (comp.types.some(t => ['locality', 'sublocality', 'administrative_area_level_3'].includes(t))) {
-                            nearestName = comp.long_name; break;
-                        }
-                    }
-                    if (nearestName !== 'Unknown Location') break;
-                }
-                if (nearestName === 'Unknown Location' && results.length > 0) {
-                    nearestName = (results[0].formatted_address || '').split(',')[0].trim() || nearestName;
-                }
-            } catch (e) { console.warn('PA: Reverse geocode failed', e); }
-
-            paShowManualPinConfirm(place, lat, lng, zoneId, nearestName);
-        });
 
         pa_mapInitialized = true;
     }
@@ -870,18 +843,44 @@ function paHandleGeoJsonUpload(input) {
 
 function paApplyGeoJsonOverlay() {
     if (!pa_map || !pa_geoJsonData) return;
+    
     // Clear any existing GeoJSON features
     pa_map.data.forEach(f => pa_map.data.remove(f));
+    
     // Add new GeoJSON
     pa_map.data.addGeoJson(pa_geoJsonData);
-    // Style the overlay
-    pa_map.data.setStyle({
-        fillColor: '#4a90d9',
-        fillOpacity: 0.12,
-        strokeColor: '#4a90d9',
-        strokeWeight: 1.5,
-        strokeOpacity: 0.7
+    
+    // Assign an internal ID to features if they don't have one
+    pa_map.data.forEach(feature => {
+        if (!feature.getProperty('__odin_id')) {
+            const possibleId = paExtractRawZoneNumber(feature);
+            feature.setProperty('__odin_id', possibleId ? possibleId : 'z_' + Math.random().toString(36).substr(2, 9));
+        }
     });
+
+    // Handle clicks for component assignment
+    google.maps.event.clearListeners(pa_map.data, 'click');
+    pa_map.data.addListener('click', (event) => {
+        if (pa_activeComponentId !== null) {
+            const fid = event.feature.getProperty('__odin_id');
+            const activeComp = pa_components.find(c => c.id === pa_activeComponentId);
+            
+            // If zone is already assigned to the ACTIVE component, deselect/remove it
+            if (activeComp && activeComp.assigned_zones.includes(fid)) {
+                activeComp.assigned_zones = activeComp.assigned_zones.filter(z => z !== fid);
+                pa_selectedZones.delete(fid);
+                paRenderComponentsList();
+            } else if (pa_selectedZones.has(fid)) {
+                // Deselect pending (red -> blue)
+                pa_selectedZones.delete(fid);
+            } else {
+                pa_selectedZones.add(fid);
+            }
+            paUpdateMapStyles();
+        }
+    });
+    
+    paUpdateMapStyles();
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -903,8 +902,10 @@ async function paDownloadProgress() {
     // Add project configuration
     formData.append('project_config', JSON.stringify({ 
         mode: pa_currentMode,
-        users: pa_allUsers
+        users: pa_allUsers,
+        components: pa_components
     }));
+    formData.append('components', JSON.stringify(pa_components));
     try {
         const resp = await fetch('/api/export/pa_progress', { method: 'POST', body: formData });
         if (!resp.ok) throw new Error(await resp.text());
@@ -939,7 +940,7 @@ async function paPerformAutoSave() {
     const zip = new JSZip();
     zip.file('resolutions.json', JSON.stringify(pa_resolvedPlaces));
     zip.file('plaza_mapping.json', JSON.stringify(pa_plazaMapping));
-    zip.file('project_config.json', JSON.stringify({ mode: 'Place assign', users: pa_allUsers }));
+    zip.file('project_config.json', JSON.stringify({ mode: 'Place assign', users: pa_allUsers, components: pa_components }));
     if (pa_projectOdBlob) zip.file('od_dataset.xlsx', pa_projectOdBlob);
     if (pa_projectShpBlob) zip.file('shapefile.zip', pa_projectShpBlob);
     const blob = await zip.generateAsync({ type: 'blob' });
@@ -1032,4 +1033,306 @@ function paToggleReviewDropdown() {
         });
     }
     dropdown.classList.add('show');
+}
+
+// ── UI View Modes (Zones / Components) ───────────────────────────────────────
+
+function paSetViewMode(mode) {
+    const btnZones = document.getElementById('pa-toggle-zones');
+    const btnComps = document.getElementById('pa-toggle-components');
+    const sidebar = document.getElementById('pa-components-sidebar');
+    
+    if (mode === 'zones') {
+        btnZones.classList.add('active');
+        btnZones.style.background = 'var(--accent)';
+        btnZones.style.color = 'white';
+        btnComps.classList.remove('active');
+        btnComps.style.background = 'transparent';
+        btnComps.style.color = 'var(--text-muted)';
+        
+        sidebar.style.display = 'none';
+        
+        // Restore markers
+        if (pa_markers) {
+            pa_markers.forEach(m => m.setMap(pa_map));
+        }
+    } else if (mode === 'components') {
+        btnComps.classList.add('active');
+        btnComps.style.background = 'var(--accent)';
+        btnComps.style.color = 'white';
+        btnZones.classList.remove('active');
+        btnZones.style.background = 'transparent';
+        btnZones.style.color = 'var(--text-muted)';
+        // Show Dialog or Proceed
+        if (pa_components && pa_components.length > 0) {
+            paProceedToComponents();
+        } else {
+            document.getElementById('pa-components-dialog').style.display = 'flex';
+        }
+    }
+}
+
+function paProceedToComponents() {
+    document.getElementById('pa-components-dialog').style.display = 'none';
+    const sidebar = document.getElementById('pa-components-sidebar');
+    sidebar.style.display = 'flex';
+    
+    // Hide markers but keep zones
+    if (pa_markers) {
+        pa_markers.forEach(m => m.setMap(null));
+    }
+}
+
+function paRenderComponentsList() {
+    const list = document.getElementById('pa-components-list');
+    list.innerHTML = '';
+    
+    pa_components.forEach(comp => {
+        const item = document.createElement('div');
+        // Single horizontal row: [ID] - [Name] - [✏️] - [Assign]
+        item.style.padding = '0.5rem 0.75rem';
+        item.style.border = pa_activeComponentId === comp.id
+            ? '1px solid var(--accent)'
+            : '1px solid var(--border)';
+        item.style.borderRadius = '8px';
+        item.style.marginBottom = '0.5rem';
+        item.style.background = pa_activeComponentId === comp.id ? 'rgba(59,130,246,0.15)' : 'var(--bg-dark)';
+        item.style.cursor = 'pointer';
+        item.style.display = 'flex';
+        item.style.flexDirection = 'row';
+        item.style.alignItems = 'center';
+        item.style.gap = '0.5rem';
+        item.onclick = () => paSelectComponent(comp.id);
+        
+        // ID badge
+        const idBadge = document.createElement('span');
+        idBadge.textContent = comp.id;
+        idBadge.style.cssText = 'min-width:22px;height:22px;background:var(--accent);color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:bold;flex-shrink:0;';
+        
+        // Name
+        const nameEl = document.createElement('span');
+        nameEl.textContent = comp.name;
+        nameEl.style.cssText = 'flex:1;color:white;font-size:0.8rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        
+        // Zone count
+        const countEl = document.createElement('span');
+        countEl.textContent = `${comp.assigned_zones.length}z`;
+        countEl.style.cssText = 'font-size:0.7rem;color:var(--text-muted);flex-shrink:0;';
+        
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.innerHTML = '✏️';
+        editBtn.title = 'Edit name';
+        editBtn.style.cssText = 'background:transparent;border:none;cursor:pointer;font-size:0.8rem;padding:2px;flex-shrink:0;';
+        editBtn.onclick = (e) => {
+            e.stopPropagation();
+            const newName = prompt('Enter new component name:', comp.name);
+            if (newName && newName.trim()) {
+                comp.name = newName.trim();
+                paRenderComponentsList();
+                paUpdateMapStyles();
+            }
+        };
+        
+        // Assign button
+        const assignBtn = document.createElement('button');
+        assignBtn.textContent = 'Assign';
+        assignBtn.className = 'btn btn-sm btn-primary';
+        assignBtn.style.cssText = 'padding:2px 8px;font-size:0.7rem;flex-shrink:0;';
+        assignBtn.onclick = (e) => {
+            e.stopPropagation();
+            paAssignZones(comp.id);
+        };
+        
+        item.appendChild(idBadge);
+        item.appendChild(nameEl);
+        item.appendChild(countEl);
+        item.appendChild(editBtn);
+        item.appendChild(assignBtn);
+        list.appendChild(item);
+    });
+}
+
+const pa_compColors = ['#f44336', '#9c27b0', '#3f51b5', '#009688', '#ff9800', '#795548', '#607d8b', '#e91e63', '#673ab7', '#2196f3', '#00bcd4', '#4caf50', '#ff5722'];
+
+function paAddComponent() {
+    const newId = pa_components.length > 0 ? Math.max(...pa_components.map(c => c.id)) + 1 : 1;
+    const newColor = pa_compColors[(newId - 1) % pa_compColors.length];
+    pa_components.push({
+        id: newId,
+        name: `Component ${newId}`,
+        color: newColor,
+        assigned_zones: []
+    });
+    paRenderComponentsList();
+}
+
+function paSelectComponent(id) {
+    pa_activeComponentId = id;
+    pa_selectedZones.clear();
+    paRenderComponentsList();
+    paUpdateMapStyles();
+}
+
+function paAssignZones(id) {
+    const comp = pa_components.find(c => c.id === id);
+    if (!comp) return;
+    
+    // Assign currently selected zones to this component
+    pa_selectedZones.forEach(zoneId => {
+        // Remove from any other component first
+        pa_components.forEach(c => {
+            c.assigned_zones = c.assigned_zones.filter(z => z !== zoneId);
+        });
+        // Add to this component
+        if (!comp.assigned_zones.includes(zoneId)) {
+            comp.assigned_zones.push(zoneId);
+        }
+    });
+    
+    pa_selectedZones.clear();
+    paRenderComponentsList();
+    paUpdateMapStyles();
+}
+
+/**
+ * Extract raw zone number from a GeoJSON feature's properties (returns null if not found).
+ */
+function paExtractRawZoneNumber(feature) {
+    const keys = ['Zone_num','zone_num','ZONE_NUM','ZoneNum','zonenum','ZONENUM',
+                  'zone_no','ZONE_NO','ZoneNo','zoneno','ZONENO','zone_numb','ZONE_NUMB',
+                  'zonenumb','ZONENUMB','ZONE_NUMBER','zone_number','ZONE','zone','id','ID'];
+    for (const k of keys) {
+        const v = feature.getProperty(k);
+        if (v !== null && v !== undefined && v !== '') return String(v);
+    }
+    return null;
+}
+
+/**
+ * Extract zone number from a GeoJSON feature's properties.
+ * Looks for common field name variations.
+ */
+function paGetZoneNumber(feature) {
+    const raw = paExtractRawZoneNumber(feature);
+    if (raw !== null) return raw;
+    return feature.getProperty('__odin_id') || '';
+}
+
+/**
+ * Extract zone name from a GeoJSON feature's properties.
+ * Looks for common field name variations.
+ */
+function paGetZoneName(feature) {
+    const keys = ['dtname','DTNAME','DtName','dt_name','DT_NAME','name','NAME','Name',
+                  'zone_name','ZONE_NAME','ZoneName','zonename','ZONENAME','district','DISTRICT'];
+    for (const k of keys) {
+        const v = feature.getProperty(k);
+        if (v !== null && v !== undefined && v !== '') return String(v);
+    }
+    return '';
+}
+
+function paUpdateMapStyles() {
+    if (!pa_map || !pa_map.data) return;
+    
+    // Clear old labels
+    pa_componentLabels.forEach(m => m.setMap(null));
+    pa_componentLabels = [];
+    
+    pa_map.data.setStyle((feature) => {
+        const fid = feature.getProperty('__odin_id');
+        let style = {
+            fillColor: '#4a90d9',
+            fillOpacity: 0.12,
+            strokeColor: '#4a90d9',
+            strokeWeight: 1.5,
+            strokeOpacity: 0.7,
+            clickable: pa_activeComponentId !== null
+        };
+        
+        // Check if assigned to any component
+        const assignedComp = pa_components.find(c => c.assigned_zones.includes(fid));
+        
+        if (assignedComp) {
+            const compColor = assignedComp.color || '#22c55e';
+            style.fillColor = compColor;
+            style.fillOpacity = 0.3;
+            style.strokeColor = compColor;
+            style.strokeWeight = 2;
+            style.strokeOpacity = 1.0;
+        }
+        
+        // Red overrides green if currently selected (pending assign)
+        if (pa_selectedZones.has(fid)) {
+            style.fillColor = '#ef4444';
+            style.fillOpacity = 0.3;
+            style.strokeColor = '#ef4444';
+            style.strokeWeight = 2;
+            style.strokeOpacity = 1.0;
+        }
+        
+        return style;
+    });
+    
+    // Add labels AFTER setStyle (otherwise Google Maps batches and may not update)
+    // We iterate features to render labels for assigned zones
+    pa_map.data.forEach(feature => {
+        const fid = feature.getProperty('__odin_id');
+        const assignedComp = pa_components.find(c => c.assigned_zones.includes(fid));
+        const zoneName = paGetZoneName(feature);
+        const geometry = feature.getGeometry();
+        if (!geometry) return;
+        
+        const bounds = new google.maps.LatLngBounds();
+        if (geometry.getType() === 'Polygon') {
+            geometry.getArray()[0].forEachLatLng(latlng => bounds.extend(latlng));
+        } else if (geometry.getType() === 'MultiPolygon') {
+            geometry.getArray()[0].getArray()[0].forEachLatLng(latlng => bounds.extend(latlng));
+        }
+        const center = bounds.getCenter();
+        if (!center) return;
+        
+        if (assignedComp) {
+            // Assigned label: component number + zone name
+            const labelText = zoneName ? `[${assignedComp.id}] ${zoneName}` : `[${assignedComp.id}]`;
+            const compColor = assignedComp.color || '#22c55e';
+            const labelMarker = new google.maps.Marker({
+                position: center,
+                map: pa_map,
+                label: {
+                    text: labelText,
+                    color: compColor,
+                    fontSize: '11px',
+                    fontWeight: 'bold'
+                },
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 0  // invisible icon, label only
+                },
+                clickable: false,
+                zIndex: 10
+            });
+            pa_componentLabels.push(labelMarker);
+        } else if (zoneName) {
+            // Default label: just the zone name (shown in components mode)
+            const labelMarker = new google.maps.Marker({
+                position: center,
+                map: pa_map,
+                label: {
+                    text: zoneName,
+                    color: '#1e40af',
+                    fontSize: '9px',
+                    fontWeight: '500'
+                },
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 0
+                },
+                clickable: false,
+                zIndex: 5
+            });
+            pa_componentLabels.push(labelMarker);
+        }
+    });
 }

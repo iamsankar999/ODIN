@@ -9,8 +9,7 @@ import googlemaps
 import concurrent.futures
 import os
 from dotenv import load_dotenv
-
-# Load .env so GOOGLE_MAPS_API_KEY is available to os.environ
+from functools import lru_cache
 load_dotenv()
 
 # Initialize Global Reference Dictionary lazily
@@ -135,6 +134,30 @@ def get_gmaps_client():
         if api_key:
             _gmaps_client = googlemaps.Client(key=api_key)
     return _gmaps_client
+
+@lru_cache(maxsize=2000)
+def _cached_places_query(query: str):
+    client = get_gmaps_client()
+    if not client: return []
+    try:
+        places_result = client.places(query=query)
+        if places_result and places_result.get('results'):
+            return places_result['results']
+    except Exception:
+        pass
+    return []
+
+@lru_cache(maxsize=2000)
+def _cached_geocode_query(query: str):
+    client = get_gmaps_client()
+    if not client: return []
+    try:
+        geo_result = client.geocode(query)
+        if geo_result:
+            return [{"name": query, "geometry": g.get("geometry", {}), "formatted_address": g.get("formatted_address", "")} for g in geo_result]
+    except Exception:
+        pass
+    return []
 
 def standardize_place_name(name: str) -> str:
     """
@@ -312,138 +335,121 @@ def generate_suggestions(target_name: str, limit: int = 10, plaza_coords: list =
 
         suggestions = []
 
-        # Step 3: Search Google Places (Text Search) for each candidate name.
-        # Text Search returns MULTIPLE locations for the same name (e.g.
-        # 4 different Mohammadpurs within Bihar) — unlike geocode() which
-        # typically returns only the single most prominent result.
-        def process_candidate(item):
+        # Step 3: Build a flat list of all required API queries
+        states_list = []
+        if state and state != "All States":
+            states_list = [s.strip() for s in state.split(",")]
+
+        queries_to_run = []
+        for item in raw_internal:
             name_to_geocode = item["name"]
-            results = []
-            try:
-                states_list = []
-                if state and state != "All States":
-                    states_list = [s.strip() for s in state.split(",")]
+            if states_list:
+                for st in states_list:
+                    queries_to_run.append((item, st, f"{name_to_geocode}, {st}, India"))
+            else:
+                queries_to_run.append((item, None, f"{name_to_geocode}, India"))
 
-                queries_to_run = []
-                if states_list:
-                    for st in states_list:
-                        queries_to_run.append((st, f"{name_to_geocode}, {st}, India"))
-                else:
-                    queries_to_run.append((None, f"{name_to_geocode}, India"))
+        # Step 4: Execute queries concurrently across all states & candidates
+        def execute_query(task):
+            item, st, search_query = task
+            # PRIMARY: Places Text Search
+            current_entries = _cached_places_query(search_query)
+            # FALLBACK: Geocode
+            if not current_entries:
+                current_entries = _cached_geocode_query(search_query)
+            
+            # Tag entries with requested state safely
+            processed = []
+            for entry in current_entries:
+                entry_copy = dict(entry)
+                entry_copy['_requested_state'] = st
+                processed.append(entry_copy)
+            return item, processed
 
-                place_entries = []
+        results_by_item = {id(item): [] for item in raw_internal}
+        
+        # Increased max_workers to 30 to blast through up to 50 concurrent state queries
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+            future_to_task = {executor.submit(execute_query, task): task for task in queries_to_run}
+            for future in concurrent.futures.as_completed(future_to_task):
+                try:
+                    item, entries = future.result()
+                    results_by_item[id(item)].extend(entries)
+                except Exception as e:
+                    print(f"Error executing cached query: {e}")
+
+        # Step 5: Process results per item
+        suggestions = []
+        for item in raw_internal:
+            place_entries = results_by_item[id(item)]
+            name_to_geocode = item["name"]
+            
+            for geo_entry in place_entries:
+                req_st = geo_entry.get('_requested_state')
+                formatted_address = geo_entry.get("formatted_address", "")
                 
-                for st, search_query in queries_to_run:
-                    # PRIMARY: Use Places Text Search for multiple results
-                    current_entries = []
-                    try:
-                        places_result = client.places(query=search_query)
-                        if places_result and places_result.get('results'):
-                            current_entries = places_result['results']
-                    except Exception:
-                        pass  # Fallback below
-
-                    # FALLBACK: If Places API returned nothing, try geocode()
-                    if not current_entries:
-                        try:
-                            geo_result = client.geocode(search_query)
-                            if geo_result:
-                                for g in geo_result:
-                                    current_entries.append({
-                                        "name": name_to_geocode,
-                                        "geometry": g.get("geometry", {}),
-                                        "formatted_address": g.get("formatted_address", "")
-                                    })
-                        except Exception:
-                            pass
-                            
-                    # Tag entries with the requested state for filtering later
-                    for entry in current_entries:
-                        entry['_requested_state'] = st
-                    
-                    place_entries.extend(current_entries)
-
-                for geo_entry in place_entries:
-                    req_st = geo_entry.get('_requested_state')
-                    formatted_address = geo_entry.get("formatted_address", "")
-                    
-                    # State verification via formatted_address
-                    if req_st:
-                        if req_st.lower() not in formatted_address.lower():
-                            continue
-
-                    geom = geo_entry.get("geometry", {}).get("location", {})
-                    g_lat = geom.get("lat")
-                    g_lng = geom.get("lng")
-                    if g_lat is None or g_lng is None:
+                # State verification via formatted_address
+                if req_st:
+                    if req_st.lower() not in formatted_address.lower():
                         continue
 
-                    # Use Google's own name for the place, NOT the DB name
-                    google_name = geo_entry.get("name", name_to_geocode)
+                geom = geo_entry.get("geometry", {}).get("location", {})
+                g_lat = geom.get("lat")
+                g_lng = geom.get("lng")
+                if g_lat is None or g_lng is None:
+                    continue
 
-                    # Detect Google Plus Codes (e.g. "RH9V+7W9") and replace
-                    # with the first meaningful part of formatted_address
-                    if re.match(r'^[A-Z0-9]{4,}\+[A-Z0-9]+', google_name):
-                        # Extract a proper name from the formatted address
-                        addr_parts = [p.strip() for p in formatted_address.split(',')]
-                        # First part is usually the locality name
-                        if addr_parts and not re.match(r'^[A-Z0-9]{4,}\+', addr_parts[0]):
-                            google_name = addr_parts[0]
-                        elif len(addr_parts) > 1:
-                            google_name = addr_parts[1]
+                # Use Google's own name for the place, NOT the DB name
+                google_name = geo_entry.get("name", name_to_geocode)
 
-                    # Strip state/pincode/India from address when state filter active
-                    if req_st:
-                        formatted_address = clean_formatted_address(formatted_address, req_st)
+                # Detect Google Plus Codes (e.g. "RH9V+7W9") and replace
+                if re.match(r'^[A-Z0-9]{4,}\+[A-Z0-9]+', google_name):
+                    addr_parts = [p.strip() for p in formatted_address.split(',')]
+                    if addr_parts and not re.match(r'^[A-Z0-9]{4,}\+', addr_parts[0]):
+                        google_name = addr_parts[0]
+                    elif len(addr_parts) > 1:
+                        google_name = addr_parts[1]
 
-                    result_item = {
-                        "name": google_name,
-                        "lat": g_lat,
-                        "lng": g_lng,
-                        "score": item["score"],
-                        "dist_km": None,
-                        "source": item.get("source", "Internal DB"),
-                        "formatted_address": formatted_address,
-                    }
+                # Strip state/pincode/India from address when state filter active
+                if req_st:
+                    formatted_address = clean_formatted_address(formatted_address, req_st)
 
-                    # --- Place Assign In-Zone Check ---
-                    result_item["in_zone"] = False
-                    if zone_polygon is not None:
-                        pt = Point(g_lng, g_lat)
-                        if pt.within(zone_polygon):
-                            result_item["in_zone"] = True
+                result_item = {
+                    "name": google_name,
+                    "lat": g_lat,
+                    "lng": g_lng,
+                    "score": item["score"],
+                    "dist_km": None,
+                    "source": item.get("source", "Internal DB"),
+                    "formatted_address": formatted_address,
+                }
 
-                    # --- Compute distance to each plaza and pick nearest ---
-                    if valid_plazas:
-                        min_dist = None
-                        nearest_name = None
-                        for plaza in valid_plazas:
-                            d = haversine_km(plaza['lat'], plaza['lng'], g_lat, g_lng)
-                            if min_dist is None or d < min_dist:
-                                min_dist = d
-                                nearest_name = plaza['name']
+                # --- Place Assign In-Zone Check ---
+                result_item["in_zone"] = False
+                if zone_polygon is not None:
+                    pt = Point(g_lng, g_lat)
+                    if pt.within(zone_polygon):
+                        result_item["in_zone"] = True
 
-                        proximity_bonus = 20 * math.exp(-min_dist / 150.0)
-                        result_item["dist_km"] = round(min_dist, 1)
-                        result_item["nearest_plaza"] = nearest_name
-                        result_item["score"] = round(min(100, result_item["score"] + proximity_bonus))
-                    else:
-                        result_item["dist_km"] = None
-                        result_item["nearest_plaza"] = None
+                # --- Compute distance to each plaza and pick nearest ---
+                if valid_plazas:
+                    min_dist = None
+                    nearest_name = None
+                    for plaza in valid_plazas:
+                        d = haversine_km(plaza['lat'], plaza['lng'], g_lat, g_lng)
+                        if min_dist is None or d < min_dist:
+                            min_dist = d
+                            nearest_name = plaza['name']
 
-                    results.append(result_item)
+                    proximity_bonus = 20 * math.exp(-min_dist / 150.0)
+                    result_item["dist_km"] = round(min_dist, 1)
+                    result_item["nearest_plaza"] = nearest_name
+                    result_item["score"] = round(min(100, result_item["score"] + proximity_bonus))
+                else:
+                    result_item["dist_km"] = None
+                    result_item["nearest_plaza"] = None
 
-            except Exception as geo_err:
-                print(f"Places search failed for '{name_to_geocode}': {geo_err}")
-            return results
-
-        # Execute in parallel to save time
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_item = {executor.submit(process_candidate, item): item for item in raw_internal}
-            for future in concurrent.futures.as_completed(future_to_item):
-                res_list = future.result()
-                if res_list:
-                    suggestions.extend(res_list)
+                suggestions.append(result_item)
 
 
         # Deduplicate by coordinates (lat+lng rounded to 4dp) — same-name but different locations are kept

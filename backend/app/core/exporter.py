@@ -160,7 +160,7 @@ def generate_export_excel(original_excel_bytes: bytes, shapefile_gdf: gpd.GeoDat
                 xl.parse(sheet).to_excel(writer, sheet_name=sheet, index=False)
     return output.getvalue()
 
-def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None, include_zone: bool = False, commodity_mapping: Dict[str, Any] = None) -> bytes:
+def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataFrame, original_excel_bytes: bytes = None, include_zone: bool = False, commodity_mapping: Dict[str, Any] = None, components: list = None) -> bytes:
     districts_gdf = get_india_districts_gdf()
     spatial_lookup = _get_batch_spatial_info(mapping, shapefile_gdf, districts_gdf)
     
@@ -329,6 +329,23 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                     out_row['ORIGIN_COORD'] = f"{o_lat},{o_lng}" if o_lat and o_lng else ""
                     out_row['DESTINATION_COORD'] = f"{d_lat},{d_lng}" if d_lat and d_lng else ""
                     
+                    # Apply Zones & Components
+                    o_zone = get_zone(o_val, p_val)
+                    d_zone = get_zone(d_val, p_val)
+                    out_row['ORIGIN_ZONE'] = o_zone
+                    out_row['DESTINATION_ZONE'] = d_zone
+                    
+                    # Component lookup map
+                    comp_map = {}
+                    if components:
+                        for comp in components:
+                            c_num = str(comp.get('id', ''))
+                            for z in comp.get('assigned_zones', []):
+                                comp_map[str(z)] = c_num
+                                
+                    out_row['ORIGIN_COMP'] = comp_map.get(str(o_zone), "") if o_zone else ""
+                    out_row['DESTINATION_COMP'] = comp_map.get(str(d_zone), "") if d_zone else ""
+                    
                     out_data.append(out_row)
                     
                 df_out = pd.DataFrame(out_data)
@@ -336,7 +353,8 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                 final_cols = [
                     "VEHICLE_CODE", "MAV_SPLIT", "ORIGIN", "DESTINATION", "COMMODITY_TRIP_PURPOSE", 
                     "DIRECTION", "PLAZA_NAME", "Detailed_Comm_code", "Detailed_Comm_Name",
-                    "ORIGIN_COORD", "DESTINATION_COORD"
+                    "ORIGIN_COORD", "DESTINATION_COORD",
+                    "ORIGIN_ZONE", "DESTINATION_ZONE", "ORIGIN_COMP", "DESTINATION_COMP"
                 ]
                 df_out = df_out[[c for c in final_cols if c in df_out.columns]]
                 df_out.to_excel(writer, sheet_name="Resolved_rawOD", index=False)
@@ -366,6 +384,115 @@ def generate_progress_excel(mapping: Dict[str, Any], shapefile_gdf: gpd.GeoDataF
                     df_comm_code.to_excel(writer, sheet_name='Commodity_code', index=False)
                 
         df.to_excel(writer, sheet_name='Resolved_Places', index=False)
+        
+        # ── Zoning_scheme sheet (built from GeoJSON/shapefile) ──
+        if shapefile_gdf is not None and not shapefile_gdf.empty:
+            ZONE_NUM_KEYS = [
+                'Zone_num', 'zone_num', 'ZONE_NUM', 'ZoneNum', 'zonenum', 'ZONENUM',
+                'zone_no', 'ZONE_NO', 'ZoneNo', 'zoneno', 'ZONENO', 'zone_numb', 'ZONE_NUMB',
+                'zonenumb', 'ZONENUMB', 'ZONE_NUMBER', 'zone_number', 'ZONE', 'zone', 'id', 'ID'
+            ]
+            ZONE_NAME_KEYS = [
+                'dtname', 'DTNAME', 'DtName', 'dt_name', 'DT_NAME',
+                'name', 'NAME', 'Name', 'zone_name', 'ZONE_NAME',
+                'ZoneName', 'zonename', 'ZONENAME', 'district', 'DISTRICT'
+            ]
+            def _pick_col(df_cols, keys):
+                for k in keys:
+                    if k in df_cols: return k
+                return None
+            
+            cols = list(shapefile_gdf.columns)
+            num_col = _pick_col(cols, ZONE_NUM_KEYS)
+            name_col = _pick_col(cols, ZONE_NAME_KEYS)
+            
+            # Spatial join with districts_gdf to get State and District
+            try:
+                # Ensure CRS is 4326 for spatial join
+                if shapefile_gdf.crs and shapefile_gdf.crs.to_epsg() != 4326:
+                    sgdf_4326 = shapefile_gdf.to_crs(epsg=4326)
+                else:
+                    sgdf_4326 = shapefile_gdf.copy()
+                    if not sgdf_4326.crs:
+                        sgdf_4326.set_crs(epsg=4326, inplace=True)
+                
+                # Compute centroids for Point-in-Polygon
+                centroids = sgdf_4326.copy()
+                centroids['geometry'] = centroids.geometry.centroid
+                
+                # Spatial join
+                joined = gpd.sjoin(centroids, districts_gdf, how="left", predicate="intersects")
+                # Deduplicate in case of exact boundary intersection
+                joined = joined[~joined.index.duplicated(keep='first')]
+            except Exception as e:
+                print("Spatial join for Zoning_scheme failed:", e)
+                joined = shapefile_gdf
+                sgdf_4326 = shapefile_gdf
+
+            # Build lookup for Component Number
+            comp_map = {}
+            if components:
+                for comp in components:
+                    c_num = str(comp.get('id', ''))
+                    for z in comp.get('assigned_zones', []):
+                        comp_map[str(z)] = c_num
+            
+            zoning_rows = []
+            
+            # Identify correct district/state columns (handle suffixes from spatial join)
+            dist_col = 'dtname_right' if 'dtname_right' in joined.columns else 'dtname'
+            state_col = 'stname_right' if 'stname_right' in joined.columns else 'stname'
+            
+            for idx, feat in joined.iterrows():
+                # Extract zone info directly from the original shapefile to avoid suffix collisions
+                orig_feat = sgdf_4326.loc[idx] if idx in sgdf_4326.index else feat
+                z_num = orig_feat[num_col] if num_col and num_col in orig_feat else ''
+                z_name = orig_feat[name_col] if name_col and name_col in orig_feat else ''
+                
+                dist = feat.get(dist_col, '')
+                state = feat.get(state_col, '')
+                
+                # Centroid coords
+                orig_geom = orig_feat.geometry
+                if orig_geom and not orig_geom.is_empty:
+                    c = orig_geom.centroid
+                    centroid_str = f"{c.y:.6f},{c.x:.6f}"
+                else:
+                    centroid_str = ""
+                    
+                zoning_rows.append({
+                    'Zone number': z_num,
+                    'Zone name': z_name,
+                    'District': dist if pd.notna(dist) else '',
+                    'State': state if pd.notna(state) else '',
+                    'Component Number': comp_map.get(str(z_num), ''),
+                    'Zone_Centroid': centroid_str
+                })
+            df_zoning = pd.DataFrame(zoning_rows)
+            df_zoning.to_excel(writer, sheet_name='Zoning_scheme', index=False)
+        
+        # ── Component_list sheet ──
+        if components:
+            comp_rows = []
+            for comp in components:
+                comp_rows.append({
+                    'Component number': comp.get('id', ''),
+                    'Component name': comp.get('name', ''),
+                    'Zone number': ', '.join(str(z) for z in comp.get('assigned_zones', []))
+                })
+            df_comp = pd.DataFrame(comp_rows)
+            df_comp.to_excel(writer, sheet_name='Component_list', index=False)
+        
+        # ── Comm_Category sheet (FIX #5) ──
+        try:
+            import os
+            db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'database', 'Commodity_unicode.csv'))
+            if os.path.exists(db_path):
+                df_comm = pd.read_csv(db_path)
+                df_comm.to_excel(writer, sheet_name='Comm_Category', index=False)
+        except Exception as e:
+            print(f"Warning: Could not add Comm_Category sheet: {e}")
+            
     return output.getvalue()
 
 
