@@ -32,7 +32,7 @@ let pa_placeOccurrencesMap = {};
 let pa_globalTotalOccurrences = 0;
 let pa_pendingReturnToPlaceId = null;
 let pa_zoneBoundaryLayer = null;
-let pa_currentMode = 'Place assign';
+let pa_currentMode = 'Zone Assign';
 let pa_components = [];
 let pa_activeComponentId = null;
 let pa_selectedZones = new Set();
@@ -44,7 +44,8 @@ function enterPlaceAssign() {
     switchView('view-place-assign');
     paStartStatusPolling();
     paSyncThemeToggle();
-    paShowDataSourceDialog();
+    // Map opens directly; project imported via topbar "Import Project" button
+    paInitMapAndRender();
 }
 
 function paGoBack() {
@@ -117,6 +118,9 @@ function paToggleTheme() {
         const el = document.getElementById(id);
         if (el) el.checked = isLight;
     });
+    if (typeof czRefreshColors === 'function') {
+        czRefreshColors();
+    }
 }
 
 // ── Data Source Dialog ────────────────────────────────────────────────────────
@@ -140,7 +144,7 @@ async function paLoadNewProject() {
         let file;
         if ('showOpenFilePicker' in window) {
             const [handle] = await window.showOpenFilePicker({
-                types: [{ description: 'ODIN Zone Assign ZIP', accept: { 'application/zip': ['.zip'] } }],
+                types: [{ description: 'ODIN Place Search ZIP', accept: { 'application/zip': ['.zip'] } }],
                 multiple: false
             });
             file = await handle.getFile();
@@ -156,7 +160,7 @@ async function paLoadNewProject() {
 
         if (!file) { paShowDataSourceDialog(); return; }
 
-        paShowLoadingOverlay('Parsing Zone Assign project bundle...');
+        paShowLoadingOverlay('Parsing Place Search project bundle...');
         await paParseZoneAssignZip(file);
 
     } catch (err) {
@@ -171,7 +175,7 @@ async function paLoadNewProject() {
     }
 }
 
-// ── Parse Zone Assign ZIP ─────────────────────────────────────────────────────
+// ── Parse Place Search ZIP ───────────────────────────────────────────────────
 
 async function paParseZoneAssignZip(file) {
     if (typeof JSZip === 'undefined') { alert('JSZip not loaded.'); return; }
@@ -183,7 +187,7 @@ async function paParseZoneAssignZip(file) {
     if (resFile) {
         pa_resolvedPlaces = JSON.parse(await resFile.async('string'));
     } else {
-        alert('This ZIP does not contain a resolutions.json. Please export from Zone Assign first.');
+        alert('This ZIP does not contain a resolutions.json. Please export from Place Search first.');
         paHideLoadingOverlay();
         paShowDataSourceDialog();
         return;
@@ -229,7 +233,7 @@ async function paParseZoneAssignZip(file) {
 
     const formData = new FormData();
     formData.append('file', pa_projectOdBlob);
-    formData.append('mode', 'Zone assign'); // parse as Zone Assign data
+    formData.append('mode', 'Place Search'); // parse as Place Search data
 
     try {
         const resp = await fetch('/api/upload/excel', { method: 'POST', body: formData });
@@ -340,7 +344,7 @@ async function paInitMapAndRender() {
             mapTypeId: 'roadmap',
             mapTypeControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT }
         });
-
+        window.pa_map = pa_map;
 
         pa_mapInitialized = true;
     }
@@ -418,14 +422,16 @@ async function paRenderInitialMap() {
         const resp = await fetch('/api/shapefile/geojson');
         if (resp.ok) {
             const geojson = await resp.json();
-            pa_map.data.addGeoJson(geojson);
-            pa_map.data.setStyle({
-                fillColor: '#4285F4', fillOpacity: 0.07,
-                strokeColor: '#4285F4', strokeWeight: 1.5, clickable: false
-            });
-            const tmp = new google.maps.Data();
-            tmp.addGeoJson(geojson);
-            tmp.forEach(f => f.getGeometry().forEachLatLng(ll => { bounds.extend(ll); hasPoints = true; }));
+            if (geojson && geojson.features && geojson.features.length > 0) {
+                pa_map.data.addGeoJson(geojson);
+                pa_map.data.setStyle({
+                    fillColor: '#4285F4', fillOpacity: 0.07,
+                    strokeColor: '#4285F4', strokeWeight: 1.5, clickable: false
+                });
+                const tmp = new google.maps.Data();
+                tmp.addGeoJson(geojson);
+                tmp.forEach(f => f.getGeometry().forEachLatLng(ll => { bounds.extend(ll); hasPoints = true; }));
+            }
         }
     } catch (e) { console.warn('PA: shapefile geojson fetch failed', e); }
 
@@ -890,7 +896,7 @@ async function paDownloadProgress() {
         alert('No places resolved yet.'); return;
     }
 
-    paShowLoadingOverlay('Generating Place Assign Export...');
+    paShowLoadingOverlay('Generating Zone Assign Export...');
 
     const formData = new FormData();
     formData.append('mapping', JSON.stringify(pa_resolvedPlaces));
@@ -913,12 +919,12 @@ async function paDownloadProgress() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'ODIN_PlaceAssign_Export.zip';
+        a.download = 'ODIN_ZoneAssign_Export.zip';
         document.body.appendChild(a); a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         paHideLoadingOverlay();
-        setTimeout(() => alert('Place Assign export downloaded!'), 50);
+        setTimeout(() => alert('Zone Assign export downloaded!'), 50);
     } catch (err) {
         paHideLoadingOverlay();
         alert('Export failed: ' + err.message);
@@ -940,7 +946,7 @@ async function paPerformAutoSave() {
     const zip = new JSZip();
     zip.file('resolutions.json', JSON.stringify(pa_resolvedPlaces));
     zip.file('plaza_mapping.json', JSON.stringify(pa_plazaMapping));
-    zip.file('project_config.json', JSON.stringify({ mode: 'Place assign', users: pa_allUsers, components: pa_components }));
+    zip.file('project_config.json', JSON.stringify({ mode: 'Zone Assign', users: pa_allUsers, components: pa_components }));
     if (pa_projectOdBlob) zip.file('od_dataset.xlsx', pa_projectOdBlob);
     if (pa_projectShpBlob) zip.file('shapefile.zip', pa_projectShpBlob);
     const blob = await zip.generateAsync({ type: 'blob' });
@@ -1038,32 +1044,52 @@ function paToggleReviewDropdown() {
 // ── UI View Modes (Zones / Components) ───────────────────────────────────────
 
 function paSetViewMode(mode) {
-    const btnZones = document.getElementById('pa-toggle-zones');
-    const btnComps = document.getElementById('pa-toggle-components');
-    const sidebar = document.getElementById('pa-components-sidebar');
-    
-    if (mode === 'zones') {
-        btnZones.classList.add('active');
-        btnZones.style.background = 'var(--accent)';
-        btnZones.style.color = 'white';
-        btnComps.classList.remove('active');
-        btnComps.style.background = 'transparent';
-        btnComps.style.color = 'var(--text-muted)';
-        
+    const btnCreate = document.getElementById('pa-toggle-create-zones');
+    const btnImport = document.getElementById('pa-toggle-import-zones');
+    const btnComps  = document.getElementById('pa-toggle-components');
+    const sidebar   = document.getElementById('pa-components-sidebar');
+
+    // Reset all buttons
+    [btnCreate, btnImport, btnComps].forEach(b => {
+        if (!b) return;
+        b.classList.remove('active');
+        b.style.background = 'transparent';
+        b.style.color = 'var(--text-muted)';
+    });
+
+    function activateBtn(btn) {
+        if (!btn) return;
+        btn.classList.add('active');
+        btn.style.background = 'var(--accent)';
+        btn.style.color = 'white';
+    }
+
+    if (mode === 'create-zones') {
+        activateBtn(btnCreate);
         sidebar.style.display = 'none';
-        
-        // Restore markers
-        if (pa_markers) {
-            pa_markers.forEach(m => m.setMap(pa_map));
-        }
+        if (pa_markers) pa_markers.forEach(m => m.setMap(pa_map));
+        window.pa_map = pa_map;
+        // Activate Create Zones sidebar and overlay
+        if (typeof czActivate === 'function') czActivate();
+    } else if (mode === 'import-zones') {
+        activateBtn(btnImport);
+        sidebar.style.display = 'none';
+        if (pa_markers) pa_markers.forEach(m => m.setMap(pa_map));
+        if (typeof czDeactivate === 'function') czDeactivate();
+        // Trigger file picker for GeoJSON import
+        const picker = document.getElementById('pa-geojson-upload-toolbar');
+        if (picker) picker.click();
+    } else if (mode === 'zones') {
+        // Legacy alias — treat same as import-zones active state without re-triggering picker
+        activateBtn(btnImport);
+        sidebar.style.display = 'none';
+        if (pa_markers) pa_markers.forEach(m => m.setMap(pa_map));
+        if (typeof czDeactivate === 'function') czDeactivate();
     } else if (mode === 'components') {
-        btnComps.classList.add('active');
-        btnComps.style.background = 'var(--accent)';
-        btnComps.style.color = 'white';
-        btnZones.classList.remove('active');
-        btnZones.style.background = 'transparent';
-        btnZones.style.color = 'var(--text-muted)';
-        // Show Dialog or Proceed
+        activateBtn(btnComps);
+        if (typeof czDeactivate === 'function') czDeactivate();
+        // Inject any Create Zones data into component assignment view
+        if (typeof czInjectZonesForComponents === 'function') czInjectZonesForComponents();
         if (pa_components && pa_components.length > 0) {
             paProceedToComponents();
         } else {
@@ -1293,13 +1319,15 @@ function paUpdateMapStyles() {
         const center = bounds.getCenter();
         if (!center) return;
         
+        const zoneNum = String(paGetZoneNumber(feature) || fid || '');
         if (assignedComp) {
-            // Assigned label: component number + zone name
-            const labelText = zoneName ? `[${assignedComp.id}] ${zoneName}` : `[${assignedComp.id}]`;
+            // Assigned label: component number + zone NUMBER (name shows on hover via title)
+            const labelText = `[${assignedComp.id}] ${zoneNum}`;
             const compColor = assignedComp.color || '#22c55e';
             const labelMarker = new google.maps.Marker({
                 position: center,
                 map: pa_map,
+                title: zoneName || zoneNum,  // hover tooltip shows zone name
                 label: {
                     text: labelText,
                     color: compColor,
@@ -1314,16 +1342,17 @@ function paUpdateMapStyles() {
                 zIndex: 10
             });
             pa_componentLabels.push(labelMarker);
-        } else if (zoneName) {
-            // Default label: just the zone name (shown in components mode)
+        } else if (zoneNum) {
+            // Default label: zone NUMBER only; zone name appears on hover
             const labelMarker = new google.maps.Marker({
                 position: center,
                 map: pa_map,
+                title: zoneName || zoneNum,  // hover tooltip shows zone name
                 label: {
-                    text: zoneName,
-                    color: '#1e40af',
-                    fontSize: '9px',
-                    fontWeight: '500'
+                    text: zoneNum,
+                    color: '#93c5fd',
+                    fontSize: '10px',
+                    fontWeight: '600'
                 },
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,

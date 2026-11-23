@@ -153,7 +153,7 @@ echo.
 
 :: Change to backend directory and start uvicorn (foreground — keeps server alive)
 pushd "%BACKEND%"
-"%PYEXE%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+"%PYEXE%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 popd
 
 :: Reached here only if uvicorn exits (user Ctrl+C or crash)

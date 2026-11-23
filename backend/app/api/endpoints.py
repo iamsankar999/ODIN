@@ -206,7 +206,7 @@ async def upload_excel(
             "commodity_suggestions": {}
         }
         
-        if mode == "Zone assign":
+        if mode in ["Zone assign", "Place Search"]:
             from app.core.commodity_matcher import get_suggestions_for_unresolved
             unresolved = parsed_data.get("unresolved_commodities", [])
             response_data["commodity_suggestions"] = get_suggestions_for_unresolved(unresolved)
@@ -398,7 +398,7 @@ def get_shapefile_geojson():
     """
     global global_gdf
     if global_gdf is None:
-        raise HTTPException(status_code=404, detail="No shapefile loaded")
+        return {"type": "FeatureCollection", "features": []}
     try:
         # Ensure geographic CRS
         gdf = global_gdf
@@ -937,3 +937,546 @@ start "" "ODIN_Launch.bat" --no-browser
         "message": "Update downloaded. ODIN will restart automatically.",
         "version": release.get("tag_name", "unknown"),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  CREATE ZONES — Districts API
+# ═══════════════════════════════════════════════════════════════════════
+
+import os as _os
+import json
+import zipfile
+from io import BytesIO
+from fastapi.responses import StreamingResponse, JSONResponse, Response as FastResponse
+
+_possible_paths = [
+    _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "database", "INDIA_DISTRICTSoriginal.geojson")),
+    _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "database", "INDIA_DISTRICTSoriginal.geojson")),
+    _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "od_validation_system", "database", "INDIA_DISTRICTSoriginal.geojson")),
+]
+_DISTRICTS_PATH = next((p for p in _possible_paths if _os.path.exists(p)), _possible_paths[0])
+_cached_states = None
+_cached_states_gdf = None
+
+_possible_states_paths = [
+    _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "database", "INDIA_STATES.geojson")),
+    _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "..", "database", "INDIA_STATES.geojson")),
+]
+_STATES_PATH = next((p for p in _possible_states_paths if _os.path.exists(p)), _possible_states_paths[0])
+
+def _get_states_gdf():
+    global _cached_states_gdf
+    if _cached_states_gdf is None and _os.path.exists(_STATES_PATH):
+        try:
+            gdf = gpd.read_file(_STATES_PATH)
+            if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+            st_col = next((c for c in gdf.columns if c.upper() in ["STNAME", "STATE_NAME", "STATE"]), None)
+            if st_col:
+                gdf["_st_norm"] = gdf[st_col].astype(str).str.strip().str.upper()
+            _cached_states_gdf = gdf
+        except Exception as e:
+            print(f"Error loading states gdf: {e}")
+    return _cached_states_gdf
+
+@router.get("/states/geojson")
+def get_states_geojson():
+    """Stream the India states GeoJSON (INDIA_STATES.geojson, ~2.3MB, read-only)."""
+    if not _os.path.exists(_STATES_PATH):
+        raise HTTPException(status_code=404, detail="INDIA_STATES.geojson not found in database folder.")
+    def _stream():
+        with open(_STATES_PATH, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+    return StreamingResponse(_stream(), media_type="application/json",
+                             headers={"Content-Disposition": "inline; filename=states.geojson"})
+
+
+@router.post("/states/dissolve")
+def dissolve_states(payload: dict = Body(...)):
+    """Accept a list of state names and return the dissolved outer boundary GeoJSON feature."""
+    states = payload.get("states", [])
+    if not states:
+        raise HTTPException(status_code=400, detail="No states specified")
+    gdf = _get_states_gdf()
+    if gdf is None or "_st_norm" not in gdf.columns:
+        raise HTTPException(status_code=500, detail="States spatial database not available")
+    st_upper = [str(s).strip().upper() for s in states if s]
+    sub = gdf[gdf["_st_norm"].isin(st_upper)]
+    if sub.empty:
+        raise HTTPException(status_code=404, detail="No matching states found for dissolve")
+    try:
+        dissolved = sub.dissolve()
+        geom = dissolved.geometry.values[0]
+        geom_json = json.loads(gpd.GeoSeries([geom]).to_json())["features"][0]["geometry"]
+        return {
+            "type": "Feature",
+            "properties": {"states": states},
+            "geometry": geom_json
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dissolve failed: {str(e)}")
+
+
+@router.get("/districts/geojson")
+def get_districts_geojson():
+    """Stream the India districts GeoJSON from the database folder (read-only, never modified)."""
+    if not _os.path.exists(_DISTRICTS_PATH):
+        raise HTTPException(status_code=404, detail="INDIA_DISTRICTSoriginal.geojson not found in database folder.")
+    def _stream():
+        with open(_DISTRICTS_PATH, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+    return StreamingResponse(_stream(), media_type="application/json",
+                             headers={"Content-Disposition": "inline; filename=districts.geojson"})
+
+
+@router.get("/districts/states")
+def get_districts_states():
+    """Return a sorted list of unique state names from the districts GeoJSON."""
+    global _cached_states
+    if _cached_states is not None:
+        return {"states": _cached_states}
+    if not _os.path.exists(_DISTRICTS_PATH):
+        raise HTTPException(status_code=404, detail="INDIA_DISTRICTSoriginal.geojson not found.")
+    try:
+        with open(_DISTRICTS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            states = set()
+            for feat in data.get("features", []):
+                st = feat.get("properties", {}).get("stname")
+                if st:
+                    states.add(str(st).strip())
+            _cached_states = sorted(list(states))
+        return {"states": _cached_states}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read states: {str(e)}")
+
+
+@router.post("/districts/dissolve")
+async def dissolve_districts(payload: dict = Body(...)):
+    """
+    Accept zone definitions and component assignments, dissolve per-zone geometries
+    (states, merged states, districts, merged districts, or custom scissor splits),
+    then return a ZIP containing:
+      - zones.geojson  (dissolved, with zone_num, zone_name, district_region, stname, component_name)
+      - zones_summary.xlsx  (Zoning_scheme sheet + Component_list sheet)
+    """
+    import pandas as pd
+    from shapely.geometry import shape as _shape
+
+    zones = payload.get("zones", [])
+    if not zones:
+        raise HTTPException(status_code=400, detail="No zones provided.")
+
+    try:
+        from app.core.algorithms import get_india_districts_gdf
+        gdf = get_india_districts_gdf()
+        if gdf is None:
+            if not _os.path.exists(_DISTRICTS_PATH):
+                raise HTTPException(status_code=404, detail="INDIA_DISTRICTSoriginal.geojson not found.")
+            gdf = gpd.read_file(_DISTRICTS_PATH)
+            if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+
+        # Load states GDF if available for fast state dissolving
+        states_gdf = None
+        if _os.path.exists(_STATES_PATH):
+            try:
+                states_gdf = gpd.read_file(_STATES_PATH)
+                if states_gdf.crs is None or states_gdf.crs.to_epsg() != 4326:
+                    states_gdf = states_gdf.to_crs(epsg=4326)
+                # Normalise column
+                for c in ["STNAME", "stname"]:
+                    if c in states_gdf.columns:
+                        states_gdf["_st_norm"] = states_gdf[c].astype(str).str.strip().str.upper()
+                        break
+            except Exception as e:
+                print(f"Warning: could not load states_gdf: {e}")
+
+        dissolved_features = []
+        for z in zones:
+            z_num  = z.get("zone_num", "")
+            z_name = z.get("zone_name", "")
+            dists  = z.get("districts", [])
+            stname = z.get("stname", "")
+            states = z.get("states", []) or ([stname] if stname else [z_name])
+            comp_num  = z.get("component_num", "")
+            comp_name = z.get("component_name", "")
+            geom_type = z.get("type", "districts")  # 'state' | 'state-merged' | 'districts' | 'split'
+
+            # 1. Custom scissor split geometry supplied directly
+            if geom_type == "split" or z.get("geometry"):
+                raw_geom = z.get("geometry")
+                if raw_geom:
+                    geom = _shape(raw_geom)
+                    reg = z.get("district_region") or z.get("district") or z_name
+                    dissolved_features.append({
+                        "type": "Feature",
+                        "geometry": json.loads(gpd.GeoSeries([geom]).to_json())["features"][0]["geometry"],
+                        "properties": {
+                            "zone_num": str(z_num), "zone_name": str(z_name),
+                            "district_region": str(reg), "stname": str(stname),
+                            "component_num": str(comp_num), "component_name": str(comp_name)
+                        }
+                    })
+                continue
+
+            # 2. State-level zone (single state or merged states)
+            if geom_type in ["state", "state-merged"] or (not dists and states):
+                dissolved_geom = None
+                # Expand composite state strings (e.g. "ASSAM + MEGHALAYA")
+                expanded_states = []
+                for s in states:
+                    if not s:
+                        continue
+                    s_str = str(s).strip()
+                    if " + " in s_str:
+                        for part in s_str.split(" + "):
+                            p = part.strip()
+                            if p and p not in expanded_states:
+                                expanded_states.append(p)
+                    elif s_str not in expanded_states:
+                        expanded_states.append(s_str)
+
+                st_upper = [s.strip().upper() for s in expanded_states if s]
+                if states_gdf is not None and "_st_norm" in states_gdf.columns:
+                    st_sub = states_gdf[states_gdf["_st_norm"].isin(st_upper)]
+                    if not st_sub.empty:
+                        dissolved_geom = st_sub.dissolve().geometry.values[0]
+
+                if dissolved_geom is None:
+                    # Fallback to dissolving districts of those states
+                    dt_sub = gdf[gdf["stname"].astype(str).str.strip().str.upper().isin(st_upper)]
+                    if not dt_sub.empty:
+                        dissolved_geom = dt_sub.dissolve().geometry.values[0]
+
+                if dissolved_geom is not None:
+                    reg = z.get("district_region") or ", ".join(expanded_states)
+                    dissolved_features.append({
+                        "type": "Feature",
+                        "geometry": json.loads(gpd.GeoSeries([dissolved_geom]).to_json())["features"][0]["geometry"],
+                        "properties": {
+                            "zone_num": str(z_num), "zone_name": str(z_name),
+                            "district_region": str(reg), "stname": str(stname or (expanded_states[0] if expanded_states else "")),
+                            "component_num": str(comp_num), "component_name": str(comp_name)
+                        }
+                    })
+                continue
+
+            # 3. District-level zone (single or merged districts)
+            if dists:
+                st_val = str(stname or "").strip().upper()
+                if not st_val and states:
+                    st_val = str(states[0] or "").strip().upper()
+
+                if st_val:
+                    subset = gdf[
+                        (gdf["dtname"].isin(dists)) &
+                        (gdf["stname"].astype(str).str.strip().str.upper() == st_val)
+                    ]
+                    if subset.empty:
+                        subset = gdf[gdf["dtname"].isin(dists)]
+                else:
+                    subset = gdf[gdf["dtname"].isin(dists)]
+
+                if not subset.empty:
+                    dissolved = subset.dissolve()
+                    dissolved_geom = dissolved.geometry.values[0]
+                    reg = z.get("district_region") or (", ".join(dists) if len(dists) > 1 else dists[0])
+                    dissolved_features.append({
+                        "type": "Feature",
+                        "geometry": json.loads(gpd.GeoSeries([dissolved_geom]).to_json())["features"][0]["geometry"],
+                        "properties": {
+                            "zone_num": str(z_num), "zone_name": str(z_name),
+                            "district_region": str(reg), "stname": str(stname),
+                            "component_num": str(comp_num), "component_name": str(comp_name)
+                        }
+                    })
+
+        geojson_out = {"type": "FeatureCollection", "features": dissolved_features}
+        geojson_bytes = json.dumps(geojson_out, ensure_ascii=False).encode("utf-8")
+
+        # Build Excel summary
+        scheme_rows = []
+        for z in zones:
+            g_type = z.get("type", "districts")
+            d_list = z.get("districts", [])
+            s_list = z.get("states", []) or ([z.get("stname")] if z.get("stname") else [])
+            if g_type == "split":
+                reg = z.get("district_region") or z.get("district") or z.get("zone_name", "")
+            elif d_list:
+                reg = ", ".join(d_list)
+            else:
+                reg = ", ".join(s_list) if s_list else z.get("zone_name", "")
+
+            scheme_rows.append({
+                "Zone Number": z.get("zone_num", ""),
+                "Zone Name": z.get("zone_name", ""),
+                "District / Region": reg,
+                "State Name": z.get("stname") or (s_list[0] if s_list else ""),
+                "Component Number": z.get("component_num", ""),
+                "Component Name": z.get("component_name", ""),
+            })
+
+        # Aggregate component list
+        comp_map = {}
+        for z in zones:
+            cn = str(z.get("component_num", "")).strip()
+            cname = str(z.get("component_name", "")).strip()
+            if cn:
+                if cn not in comp_map:
+                    comp_map[cn] = {"Component Number": cn, "Component Name": cname, "Zone Numbers": []}
+                comp_map[cn]["Zone Numbers"].append(str(z.get("zone_num", "")))
+        comp_rows = [{"Component Number": v["Component Number"], "Component Name": v["Component Name"],
+                      "Zone Numbers": ", ".join(v["Zone Numbers"])} for v in comp_map.values()]
+
+        xl_buf = BytesIO()
+        with pd.ExcelWriter(xl_buf, engine="openpyxl") as xl_writer:
+            pd.DataFrame(scheme_rows).to_excel(xl_writer, sheet_name="Zoning_scheme", index=False)
+            if comp_rows:
+                pd.DataFrame(comp_rows).to_excel(xl_writer, sheet_name="Component_list", index=False)
+        xl_bytes = xl_buf.getvalue()
+
+        # Bundle into ZIP
+        zip_buf = BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("zones.geojson", geojson_bytes)
+            zf.writestr("zones_summary.xlsx", xl_bytes)
+        zip_buf.seek(0)
+
+        return FastResponse(
+            content=zip_buf.read(),
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=zones_export.zip"}
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Dissolve failed: {str(e)}")
+
+
+_cached_districts_gdf = None
+
+def _get_districts_gdf():
+    global _cached_districts_gdf
+    if _cached_districts_gdf is None:
+        from app.core.algorithms import get_india_districts_gdf
+        gdf = get_india_districts_gdf()
+        if gdf is None and _os.path.exists(_DISTRICTS_PATH):
+            gdf = gpd.read_file(_DISTRICTS_PATH)
+            if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+        _cached_districts_gdf = gdf
+    return _cached_districts_gdf
+
+@router.post("/districts/dissolve-boundary")
+def dissolve_districts_boundary(payload: dict = Body(...)):
+    """Accept a list of district names and return the dissolved outer boundary GeoJSON feature."""
+    districts = payload.get("districts", [])
+    if not districts:
+        raise HTTPException(status_code=400, detail="No districts specified")
+    gdf = _get_districts_gdf()
+    if gdf is None:
+        raise HTTPException(status_code=500, detail="Districts spatial database not available")
+    st_name = (payload.get("stname") or payload.get("state") or "").strip().upper()
+    if st_name:
+        sub = gdf[(gdf["dtname"].isin(districts)) & (gdf["stname"].astype(str).str.strip().str.upper() == st_name)]
+        if sub.empty:
+            sub = gdf[gdf["dtname"].isin(districts)]
+    else:
+        sub = gdf[gdf["dtname"].isin(districts)]
+    if sub.empty:
+        raise HTTPException(status_code=404, detail="No matching districts found")
+    try:
+        dissolved = sub.dissolve()
+        geom = dissolved.geometry.values[0]
+        geom_json = json.loads(gpd.GeoSeries([geom]).to_json())["features"][0]["geometry"]
+        return {
+            "type": "Feature",
+            "properties": {"districts": districts},
+            "geometry": geom_json
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"District dissolve failed: {str(e)}")
+
+
+def _extend_line(line, dist=0.08):
+    import math
+    from shapely.geometry import LineString
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return line
+    dx0 = coords[0][0] - coords[1][0]
+    dy0 = coords[0][1] - coords[1][1]
+    L0 = math.hypot(dx0, dy0) or 1.0
+    p0 = (coords[0][0] + (dx0 / L0) * dist, coords[0][1] + (dy0 / L0) * dist)
+
+    dx1 = coords[-1][0] - coords[-2][0]
+    dy1 = coords[-1][1] - coords[-2][1]
+    L1 = math.hypot(dx1, dy1) or 1.0
+    p1 = (coords[-1][0] + (dx1 / L1) * dist, coords[-1][1] + (dy1 / L1) * dist)
+    return LineString([p0] + coords + [p1])
+
+
+@router.post("/districts/split")
+async def split_district(payload: dict = Body(...)):
+    """
+    Split or clip a district polygon using a user-drawn line or polygon (DrawingManager output).
+    Supports:
+      - LineString (scissor cut across district borders or closed loop)
+      - Polygon (scissor polygon / lasso cut)
+      - Sequential multi-cuts via existing_parts
+    Returns sub-feature GeoJSON Features for each sub-zone.
+    """
+    district_name = payload.get("district")
+    clip_geom_raw  = payload.get("clip_polygon") or payload.get("cut_geometry")
+    existing_parts = payload.get("existing_parts")
+    if not district_name or not clip_geom_raw:
+        raise HTTPException(status_code=400, detail="district and clip geometry are required.")
+
+    try:
+        from shapely.geometry import shape as _shape, mapping as _mapping, Polygon, MultiPolygon
+        from shapely.ops import split as _shapely_split
+        import math
+
+        gdf = _get_districts_gdf()
+        if gdf is None:
+            raise HTTPException(status_code=404, detail="INDIA_DISTRICTSoriginal.geojson not found.")
+
+        st_filter = (payload.get("stname") or payload.get("state") or "").strip().upper()
+        if st_filter:
+            district_row = gdf[(gdf["dtname"] == district_name) & (gdf["stname"].astype(str).str.strip().str.upper() == st_filter)]
+            if district_row.empty:
+                district_row = gdf[gdf["dtname"] == district_name]
+        else:
+            district_row = gdf[gdf["dtname"] == district_name]
+        if district_row.empty:
+            raise HTTPException(status_code=404, detail=f"District '{district_name}' not found.")
+
+        district_geom = district_row.geometry.values[0]
+        clip_geom = _shape(clip_geom_raw)
+        st_name = district_row["stname"].values[0] if "stname" in district_row.columns else ""
+
+        # Check if line is closed loop on itself
+        is_closed_loop = False
+        if clip_geom.geom_type in ["LineString", "MultiLineString"]:
+            coords = list(clip_geom.coords)
+            if len(coords) >= 3:
+                d_endpoints = math.hypot(coords[0][0] - coords[-1][0], coords[0][1] - coords[-1][1])
+                # If start and end point within ~0.008 degrees, treat as closed polygon
+                if d_endpoints < 0.008 or coords[0] == coords[-1]:
+                    is_closed_loop = True
+                    if coords[0] != coords[-1]:
+                        coords.append(coords[0])
+                    clip_geom = Polygon(coords)
+
+        def _split_geom(base_geom):
+            if is_closed_loop or clip_geom.geom_type in ["Polygon", "MultiPolygon"]:
+                inner = base_geom.intersection(clip_geom)
+                outer = base_geom.difference(clip_geom)
+                pieces = []
+                for res in [inner, outer]:
+                    if res and not res.is_empty:
+                        for g in getattr(res, "geoms", [res]):
+                            if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty and g.area > 1e-9:
+                                pieces.append(g)
+                return pieces if len(pieces) >= 2 else [base_geom]
+            else:
+                # LineString cut
+                split_result = _shapely_split(base_geom, clip_geom)
+                sub_geoms = [g for g in getattr(split_result, "geoms", [split_result])
+                             if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty and g.area > 1e-9]
+
+                if len(sub_geoms) < 2:
+                    ext1 = _extend_line(clip_geom, dist=0.06)
+                    split_result = _shapely_split(base_geom, ext1)
+                    sub_geoms = [g for g in getattr(split_result, "geoms", [split_result])
+                                 if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty and g.area > 1e-9]
+
+                if len(sub_geoms) < 2:
+                    ext2 = _extend_line(clip_geom, dist=0.18)
+                    split_result = _shapely_split(base_geom, ext2)
+                    sub_geoms = [g for g in getattr(split_result, "geoms", [split_result])
+                                 if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty and g.area > 1e-9]
+
+                if len(sub_geoms) < 2:
+                    buf = clip_geom.buffer(0.0008)
+                    diff = base_geom.difference(buf)
+                    sub_geoms = [g for g in getattr(diff, "geoms", [diff])
+                                 if isinstance(g, (Polygon, MultiPolygon)) and not g.is_empty and g.area > 1e-9]
+
+                return sub_geoms if len(sub_geoms) >= 2 else [base_geom]
+
+        final_geoms = []
+        if existing_parts and len(existing_parts) >= 2:
+            any_split = False
+            for p in existing_parts:
+                p_raw = p.get("geometry") if isinstance(p, dict) and "geometry" in p else p
+                if not p_raw:
+                    continue
+                p_geom = _shape(p_raw)
+                if p_geom.intersects(clip_geom):
+                    pieces = _split_geom(p_geom)
+                    if len(pieces) > 1:
+                        any_split = True
+                        final_geoms.extend(pieces)
+                    else:
+                        final_geoms.append(p_geom)
+                else:
+                    final_geoms.append(p_geom)
+
+            if not any_split or len(final_geoms) <= len(existing_parts):
+                final_geoms = _split_geom(district_geom)
+        else:
+            final_geoms = _split_geom(district_geom)
+
+        features = []
+        for idx, g in enumerate(final_geoms):
+            features.append({
+                "type": "Feature",
+                "geometry": _mapping(g),
+                "properties": {
+                    "sub_label": f"Part {idx + 1}",
+                    "district": district_name,
+                    "stname": st_name
+                }
+            })
+
+        if not features:
+            raise HTTPException(status_code=400, detail="Split produced no valid geometry parts.")
+
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Split failed: {str(e)}")
+
+
+@router.post("/custom/merge")
+async def merge_custom_geometries(payload: dict = Body(...)):
+    """
+    Union multiple custom GeoJSON geometries together using shapely.ops.unary_union.
+    """
+    geometries = payload.get("geometries", [])
+    if len(geometries) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 geometries required to merge.")
+    try:
+        from shapely.geometry import shape as _shape, mapping as _mapping
+        from shapely.ops import unary_union
+        shapes = [_shape(g) for g in geometries if g]
+        merged = unary_union(shapes)
+        return {"type": "Feature", "geometry": _mapping(merged)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Custom merge failed: {str(e)}")
+
+

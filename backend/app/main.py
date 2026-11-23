@@ -33,6 +33,12 @@ app.include_router(endpoints.router, prefix="/api")
 def health_check():
     return {"status": "ok", "version": LOCAL_VERSION}
 
+# Favicon handler to avoid 404s
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
 # Serve frontend as static files – MUST be mounted LAST
 # http://127.0.0.1:8000/ → frontend/index.html
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

@@ -13,7 +13,7 @@ let pickingPlaza = null; // Currently being picked from map
 let filesUploaded = { shp: false, od: false };
 let currentUser = "All Users";
 let selectedStates = []; // Global state filter (empty means All States)
-let currentMode = "Zone assign"; // New Mode state
+let currentMode = "Place Search"; // Mode state (Place Search / Zone Assign / Review & Visualization)
 let map; // Google Maps Instance
 let markers = []; // Track active map markers
 let lines = [];   // Track distance polylines
@@ -99,7 +99,7 @@ async function handleLaunchClick() {
 
 function injectGoogleMapsScript(key) {
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=initMap&libraries=places&loading=async`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=initMap&libraries=places,drawing&loading=async`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
@@ -376,22 +376,22 @@ function selectModeForSetup(mode) {
     document.getElementById('setup-subtitle').textContent = `Setup - ${mode}`;
     switchView('view-setup');
 
-    // ── Place Assign: Adapt wizard upload buttons ──
+    // ── Zone Assign (former Place Assign): Adapt wizard upload buttons ──
     const shpBtn = document.getElementById('wizard-shp-btn');
     const odBtn = document.getElementById('wizard-od-btn');
     const shpInput = document.getElementById('wizard-shapefile-upload');
     const odInput = document.getElementById('wizard-od-upload');
     const openProjectPanel = document.getElementById('panel-open-project');
 
-    if (mode === 'Place assign') {
+    if (mode === 'Zone Assign' || mode === 'Place assign') {
         // Button 1: Upload new zoning shapefile
         if (shpBtn && shpBtn.childNodes[0]) shpBtn.childNodes[0].textContent = 'Upload New Shapefile';
-        // Button 2: Upload Zone Assign ZIP (not an Excel)
-        if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload Zone Assign ZIP';
+        // Button 2: Upload Place Search ZIP (not an Excel)
+        if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload Place Search ZIP';
         if (odInput) odInput.accept = '.zip';
         if (openProjectPanel) openProjectPanel.style.display = 'none';
     } else {
-        // Restore Zone Assign defaults
+        // Restore Place Search defaults
         if (shpBtn && shpBtn.childNodes[0]) shpBtn.childNodes[0].textContent = 'Upload Shapefile';
         if (odBtn && odBtn.childNodes[0]) odBtn.childNodes[0].textContent = 'Upload OD Dataset';
         if (odInput) odInput.accept = '.csv,.xlsx';
@@ -420,7 +420,7 @@ async function startTask() {
     showLoading(`Setting up ${currentMode} Task...`);
 
     try {
-        if (currentMode === 'Place assign') {
+        if (currentMode === 'Zone Assign' || currentMode === 'Place assign') {
             plazaMappingConfirmed = true;
         } else if (currentSetupTab === 'open') {
             // Project zip is already parsed in handleProjectZipUpload
@@ -430,9 +430,9 @@ async function startTask() {
             // uniquePlazas should be populated by the file upload handler
         }
 
-        // Intercept for Commodity Coding in Zone Assign mode before setting up auto-save or UI
+        // Intercept for Commodity Coding in Place Search mode before setting up auto-save or UI
         const unresolvedTotal = (pendingCommodityData.unresolved || []).length;
-        if (currentMode === "Zone assign" && unresolvedTotal > 0) {
+        if ((currentMode === "Place Search" || currentMode === "Zone assign") && unresolvedTotal > 0) {
             hideLoading();
 
             // Set afterConfirm to resume startTask
@@ -726,12 +726,12 @@ async function parseProjectZip(file) {
     if (cfgFile) {
         const content = await cfgFile.async("string");
         const cfg = JSON.parse(content);
-        // Only override mode if explicitly set AND it's a valid zone-assign mode
-        // Zone Assign is the default — only switch if config explicitly stores Place assign
-        if (cfg.mode && cfg.mode === 'Place assign') {
-            currentMode = cfg.mode;
+        // Only override mode if explicitly set
+        // Place Search is default — switch to Zone Assign if config explicitly stores Zone Assign / Place assign
+        if (cfg.mode && (cfg.mode === 'Zone Assign' || cfg.mode === 'Place assign')) {
+            currentMode = 'Zone Assign';
         } else {
-            currentMode = 'Zone assign'; // Default mode when loading a project
+            currentMode = 'Place Search'; // Default mode when loading a project
         }
         const modeSelector = document.getElementById('mode-selector');
         if (modeSelector) modeSelector.value = currentMode;
@@ -744,7 +744,7 @@ async function parseProjectZip(file) {
             console.log("Restored users:", allUsers);
         }
     } else {
-        currentMode = 'Zone assign'; // Default when no config present
+        currentMode = 'Place Search'; // Default when no config present
     }
 
     // 2. Load and Upload OD Dataset (Smart search)
@@ -766,7 +766,7 @@ async function parseProjectZip(file) {
 
     // FIX #4: After loading project, check if any survey location is unmapped.
     // If so, redirect user to survey mapping window immediately.
-    if (currentMode !== 'Place assign') {
+    if (currentMode !== 'Zone Assign' && currentMode !== 'Place assign') {
         const unmappedPlazas = Object.entries(plazaMapping)
             .filter(([, v]) => !v || v.lat === null || v.lat === undefined)
             .map(([k]) => k);
@@ -1220,7 +1220,7 @@ async function handleAppendDataUpload(input) {
         }
 
         const afterPreliminary = () => {
-            if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
+            if ((currentMode === "Place Search" || currentMode === "Zone assign") && unresolvedCommodities.length > 0) {
                 // Commodity coding step before survey mapping
                 pendingCommodityData.unresolved = unresolvedCommodities;
                 pendingCommodityData.suggestions = commoditySuggestions;
@@ -1411,7 +1411,7 @@ async function handleFileUpload(event, isFromZip = false) {
                 commodityMapping[comm] = match;
             }
 
-            if (currentMode === "Zone assign" && unresolvedCommodities.length > 0) {
+            if ((currentMode === "Place Search" || currentMode === "Zone assign") && unresolvedCommodities.length > 0) {
                 pendingCommodityData.unresolved = unresolvedCommodities;
                 pendingCommodityData.suggestions = commoditySuggestions;
                 pendingCommodityData.autoMatched = autoMatched;
@@ -1423,8 +1423,8 @@ async function handleFileUpload(event, isFromZip = false) {
                 pendingCommodityData.autoMatched = {};
             }
 
-            // Render Preliminary Analysis if present and in Zone assign mode
-            if (result.preliminary_analysis && Object.keys(result.preliminary_analysis).length > 0 && currentMode === "Zone assign") {
+            // Render Preliminary Analysis if present and in Place Search mode
+            if (result.preliminary_analysis && Object.keys(result.preliminary_analysis).length > 0 && (currentMode === "Place Search" || currentMode === "Zone assign")) {
                 renderPreliminaryAnalysis(result.preliminary_analysis);
                 const prelimModal = document.getElementById('preliminary-analysis-modal');
                 if (prelimModal) {
@@ -1439,7 +1439,7 @@ async function handleFileUpload(event, isFromZip = false) {
                         newBtn.onclick = null;
                         newBtn.addEventListener('click', () => {
                             closePreliminaryAnalysisModal();
-                            if (currentMode === "Zone assign" && pendingCommodityData.unresolved && pendingCommodityData.unresolved.length > 0 && !pendingCommodityData.afterConfirm) {
+                            if ((currentMode === "Place Search" || currentMode === "Zone assign") && pendingCommodityData.unresolved && pendingCommodityData.unresolved.length > 0 && !pendingCommodityData.afterConfirm) {
                                 // Show commodity modal immediately — afterConfirm will be set by startTask later
                                 openCommodityModal();
                             }
@@ -1891,9 +1891,14 @@ function renderPlazaMappingView() {
 }
 
 function startPickingPlaza(name) {
-    // FIX #2: Use full-screen map pick mode with confirm/back flow instead of alert
     pickingPlaza = name;
-    renderPlazaMappingView(); // Update buttons state
+
+    // FIX #2: Hide the survey modal so its backdrop doesn't block map clicks
+    const surveyModal = document.getElementById('survey-modal');
+    if (surveyModal && surveyModal.classList.contains('active')) {
+        surveyModal.classList.remove('active');
+        surveyModal.dataset.hiddenForPick = 'true';
+    }
 
     // Show the map pick overlay panel
     let overlay = document.getElementById('map-pick-overlay');
@@ -1947,7 +1952,7 @@ function startPickingPlaza(name) {
     overlay.style.display = 'block';
     overlay.dataset.currentPlaza = name;
 
-    // Make the overlay pointer-events passthrough except for the banners
+    // Pan map to existing mapping or first mapped plaza
     if (map) {
         if (plazaMapping[name] && plazaMapping[name].lat) {
             map.panTo(plazaMapping[name]);
@@ -1957,8 +1962,17 @@ function startPickingPlaza(name) {
         }
     }
 
-    // Temporary pending pick storage
     window._mapPickPending = null;
+}
+
+function _restoreSurveyModalAfterPick() {
+    const surveyModal = document.getElementById('survey-modal');
+    if (surveyModal && surveyModal.dataset.hiddenForPick === 'true') {
+        delete surveyModal.dataset.hiddenForPick;
+        surveyModal.classList.add('active');
+        // Re-render so the newly picked location shows up immediately
+        renderSurveyModal(Object.keys(plazaMapping));
+    }
 }
 
 function cancelMapPick() {
@@ -1966,7 +1980,11 @@ function cancelMapPick() {
     const overlay = document.getElementById('map-pick-overlay');
     if (overlay) overlay.style.display = 'none';
     if (map && map.tempMarker) { map.tempMarker.setMap(null); map.tempMarker = null; }
-    renderPlazaMappingView();
+    _restoreSurveyModalAfterPick();
+    // Also refresh plaza mapping view if we're in the main survey flow
+    if (document.getElementById('view-survey') && document.getElementById('view-survey').classList.contains('active')) {
+        renderPlazaMappingView();
+    }
 }
 
 function confirmMapPick() {
@@ -1980,7 +1998,11 @@ function confirmMapPick() {
     const overlay = document.getElementById('map-pick-overlay');
     if (overlay) overlay.style.display = 'none';
     if (map && map.tempMarker) { map.tempMarker.setMap(null); map.tempMarker = null; }
-    renderPlazaMappingView();
+    _restoreSurveyModalAfterPick();
+    if (document.getElementById('view-survey') && document.getElementById('view-survey').classList.contains('active')) {
+        renderPlazaMappingView();
+    }
+    updateSurveyApplyButton();
     triggerAutoSave();
 }
 
@@ -2084,7 +2106,7 @@ function confirmPlazaMapping() {
 
 
 function filterPlacesByUser() {
-    if (currentMode === 'Place assign') {
+    if (currentMode === 'Zone Assign' || currentMode === 'Place assign') {
         unmatchedPlaces = [];
         return;
     }
@@ -2842,7 +2864,7 @@ function renderMapElements(place) {
                     zIndex = 1000;
                 } else {
                     // Check if suggestion is outside assigned zone for orange color
-                    if (currentMode === "Place assign" && place.assigned_zone && s.zone !== place.assigned_zone) {
+                    if ((currentMode === "Zone Assign" || currentMode === "Place assign") && place.assigned_zone && s.zone !== place.assigned_zone) {
                         color = '#FF9800';
                     }
                 }
@@ -2867,7 +2889,7 @@ function renderMapElements(place) {
     }
 
     if (hasValidPoints) {
-        if (currentMode === "Place assign") {
+        if (currentMode === "Zone Assign" || currentMode === "Place assign") {
             const strictBounds = new google.maps.LatLngBounds();
             let hasStrictPoints = false;
             if (plazas && plazas.coords) {
@@ -2936,10 +2958,10 @@ async function renderCurrentPlace() {
     // Update Header Name
     document.getElementById('selected-place-name').textContent = place.original_name;
 
-    // Update Zone Side Item (Place assign mode only)
+    // Update Zone Side Item (Zone Assign mode only)
     const zoneTag = document.getElementById('place-zone-tag');
     const zoneDisplay = document.getElementById('place-zone-display');
-    if (currentMode === "Place assign" && place.assigned_zone) {
+    if ((currentMode === "Zone Assign" || currentMode === "Place assign") && place.assigned_zone) {
         zoneTag.style.display = 'flex';
         zoneDisplay.textContent = place.assigned_zone;
     } else {
@@ -2982,8 +3004,8 @@ async function renderCurrentPlace() {
             }
 
 
-            // If in Place Assign mode, strictly enforce the polygon constraint
-            if (currentMode === "Place assign" && place.assigned_zone) {
+            // If in Zone Assign mode, strictly enforce the polygon constraint
+            if ((currentMode === "Zone Assign" || currentMode === "Place assign") && place.assigned_zone) {
                 params.append('zone_restriction', place.assigned_zone);
             }
 
@@ -2994,7 +3016,7 @@ async function renderCurrentPlace() {
             const response = await fetch(`http://localhost:8000/api/suggestions?${params.toString()}`);
             if (response.ok) {
                 const data = await response.json();
-                if (data.error && currentMode === "Place assign") {
+                if (data.error && (currentMode === "Zone Assign" || currentMode === "Place assign")) {
                     console.error("Backend Error:", data.error);
                     window.warnedZones = window.warnedZones || new Set();
                     if (!window.warnedZones.has(data.error)) {
@@ -3768,6 +3790,24 @@ function closeSurveyModal() {
     pickingPlaza = null;
 }
 
+// ── Survey modal helper: enable Apply button only when all locations are mapped ──
+function updateSurveyApplyButton() {
+    const btn = document.getElementById('survey-apply-btn');
+    if (!btn) return;
+    const allMapped = Object.values(plazaMapping).every(v => v && v.lat !== null && v.lng !== null);
+    btn.disabled = !allMapped;
+    btn.title = allMapped ? 'Apply mapping' : 'Map all survey locations to enable';
+}
+
+// ── Clear a single plaza entry so it can be re-mapped ──
+function clearPlazaEntry(name) {
+    plazaMapping[name] = { lat: null, lng: null };
+    // Re-render the whole modal so the row switches back to unmapped state
+    const allNames = Object.keys(plazaMapping);
+    renderSurveyModal(allNames);
+    updateSurveyApplyButton();
+}
+
 function renderSurveyModal(plazas) {
     const container = document.getElementById('survey-plaza-list');
     container.innerHTML = '';
@@ -3775,66 +3815,85 @@ function renderSurveyModal(plazas) {
     plazas.forEach(name => {
         const mapping = plazaMapping[name];
         const isMapped = mapping && mapping.lat !== null && mapping.lng !== null;
+        const coordHint = isMapped ? `${Number(mapping.lat).toFixed(5)}, ${Number(mapping.lng).toFixed(5)}` : '';
         const row = document.createElement('div');
         row.className = `plaza-row ${isMapped ? 'mapped' : ''}`;
-        row.id = `plaza-row-${name.replace(/\s+/g, '-')}`;
+        row.id = `plaza-row-${name.replace(/[\s.]/g, '-')}`;
 
-        row.innerHTML = `
-            <div class="plaza-label" title="${name}">${name}</div>
-            <div class="plaza-search-container">
-                <input type="text" class="plaza-search-input" 
-                       id="plaza-input-${name.replace(/\s+/g, '-')}" 
-                       placeholder="${isMapped ? 'Mapped' : 'Search location...'}"
-                       value="${isMapped ? 'Mapped ✓' : ''}">
-            </div>
-            <button class="plaza-pick-btn ${pickingPlaza === name ? 'active' : ''}" 
-                    onclick="startPickingPlaza('${name}')" title="Pick from map">
-                +
-            </button>
-        `;
-        container.appendChild(row);
+        if (isMapped) {
+            // Already mapped: show coords + Edit button
+            row.innerHTML = `
+                <div class="plaza-label" title="${name}">${name}</div>
+                <div class="plaza-search-container" style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:#86efac;font-family:monospace;font-size:12px;">✓ ${coordHint}</span>
+                </div>
+                <button class="plaza-pick-btn" style="background:rgba(251,191,36,0.15);border-color:rgba(251,191,36,0.5);color:#fde68a;" 
+                        onclick="clearPlazaEntry('${name.replace(/'/g, "\\'")}')"
+                        title="Edit / re-map this location">✏️</button>
+            `;
+        } else {
+            // Not yet mapped: show search input + pick button
+            row.innerHTML = `
+                <div class="plaza-label" title="${name}">${name}</div>
+                <div class="plaza-search-container" style="flex:1;">
+                    <input type="text" class="plaza-search-input" 
+                           id="plaza-input-${name.replace(/[\s.]/g, '-')}" 
+                           placeholder="Search name  OR  type lat, lng and press Enter"
+                           autocomplete="off">
+                    <div style="font-size:10px;color:#94a3b8;margin-top:2px;padding-left:4px;">💡 Tip: type <code>28.61, 77.20</code> and press Enter to set by coordinates</div>
+                </div>
+                <button class="plaza-pick-btn ${pickingPlaza === name ? 'active' : ''}" 
+                        id="plaza-pick-btn-${name.replace(/[\s.]/g, '-')}"
+                        onclick="startPickingPlaza('${name.replace(/'/g, "\\'")}')"
+                        title="Click to pick location from map">📍</button>
+            `;
+            container.appendChild(row);
 
-        // Init Autocomplete
-        const input = document.getElementById(`plaza-input-${name.replace(/\s+/g, '-')}`);
-        const autocomplete = new google.maps.places.Autocomplete(input, {
-            componentRestrictions: { country: 'in' }
-        });
-        autocomplete.addListener('place_changed', () => {
-            const place = autocomplete.getPlace();
-            if (place.geometry) {
-                plazaMapping[name] = {
-                    lat: place.geometry.location.lat(),
-                    lng: place.geometry.location.lng()
-                };
-                row.classList.add('mapped');
-                input.value = "Mapped ✓";
-                triggerAutoSave();
-            }
-        });
+            // Init Google Places Autocomplete
+            const input = document.getElementById(`plaza-input-${name.replace(/[\s.]/g, '-')}`);
+            const autocomplete = new google.maps.places.Autocomplete(input, {
+                componentRestrictions: { country: 'in' }
+            });
+            autocomplete.addListener('place_changed', () => {
+                const place = autocomplete.getPlace();
+                if (place.geometry) {
+                    plazaMapping[name] = {
+                        lat: place.geometry.location.lat(),
+                        lng: place.geometry.location.lng()
+                    };
+                    renderSurveyModal(Object.keys(plazaMapping));
+                    updateSurveyApplyButton();
+                    triggerAutoSave();
+                }
+            });
 
-        // FIX #3: Handle direct lat,lng entry in Survey Modal
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            // Coordinate entry: type lat,lng and press Enter
+            input.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
                 e.preventDefault();
+                e.stopPropagation();
                 const val = input.value.trim();
-                const coordMatch = val.match(/^\s*(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)\s*$/);
+                const coordMatch = val.match(/^\s*(-?\d+\.?\d*)\s*[,\s]+\s*(-?\d+\.?\d*)\s*$/);
                 if (coordMatch) {
                     const lat = parseFloat(coordMatch[1]);
                     const lng = parseFloat(coordMatch[2]);
                     if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-                        const pos = { lat, lng };
-                        plazaMapping[name] = pos;
-                        row.classList.add('mapped');
-                        input.value = "Mapped ✓";
-                        if (map) { map.panTo(pos); map.setZoom(15); }
+                        plazaMapping[name] = { lat, lng };
+                        if (map) { map.panTo({ lat, lng }); map.setZoom(15); }
+                        renderSurveyModal(Object.keys(plazaMapping));
+                        updateSurveyApplyButton();
                         triggerAutoSave();
                     } else {
-                        alert('Invalid coordinates. Latitude must be -90 to 90, longitude -180 to 180.');
+                        alert('Invalid coordinates. Lat: -90 to 90, Lng: -180 to 180.');
                     }
                 }
-            }
-        });
+            });
+            return; // row already appended above for the unmapped case
+        }
+        container.appendChild(row);
     });
+
+    updateSurveyApplyButton();
 }
 
 function applyPlazaMapping() {
@@ -4340,7 +4399,9 @@ function resumeSession() {
         resolvedPlaces = session.resolvedPlaces || {};
         allUsers = session.allUsers || [];
         currentUser = session.currentUser || "All Users";
-        currentMode = session.currentMode || "Zone assign";
+        currentMode = session.currentMode || "Place Search";
+        if (currentMode === "Zone assign") currentMode = "Place Search";
+        else if (currentMode === "Place assign") currentMode = "Zone Assign";
         plazaMapping = session.plazaMapping || {};
         plazaMappingConfirmed = session.plazaMappingConfirmed || false;
         uniquePlazas = session.uniquePlazas || [];

@@ -2,7 +2,7 @@
 
 **ODIN** is a professional-grade geospatial validation and analytical platform designed to automate the complex process of Origin-Destination (OD) data coding. It transforms raw, manually-surveyed place names into validated, geocoded, and zone-mapped datasets.
 
-![Version](https://img.shields.io/badge/version-v2.6.0-blue.svg)
+![Version](https://img.shields.io/badge/version-v2.6.2-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-yellow.svg)
 ![FastAPI](https://img.shields.io/badge/backend-FastAPI-green.svg)
 ![Leaflet](https://img.shields.io/badge/maps-Leaflet.js-orange.svg)
@@ -140,6 +140,12 @@ The system parses multiple sheets from the uploaded Excel:
 ---
 
 ## 📋 Changelog
+
+### v2.6.2 — 2026-11-24
+- **Rename**: Renamed "Zone assign" mode to "Place Search" and "Place assign" mode to "Zone Assign" across ODIN.
+- **Feature**: State and District level Undo/Redo history tracking for zone merge/unmerge operations.
+- **Feature**: Custom sub-zone scissor cutting with boundary vertex retention and snapping.
+- **UI/UX**: Streamlined Create Zones styling, header opacity fixes, and light/dark theme polish.
 
 ### v2.6.0 — 2026-07-20
 - **Feature**: Overhauled Commodity Coding workflow. Autosave now captures user-assigned commodity codes, ensuring no progress is lost across sessions.

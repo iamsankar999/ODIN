@@ -317,7 +317,7 @@ async function rvParseProjectZip(file) {
     // Upload to backend for parsing
     const formData = new FormData();
     formData.append('file', rv_projectOdBlob);
-    formData.append('mode', 'Zone assign');
+    formData.append('mode', 'Place Search');
 
     try {
         const resp = await fetch('/api/upload/excel', { method: 'POST', body: formData });

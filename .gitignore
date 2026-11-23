@@ -31,3 +31,8 @@ backend/.env
 # ── Auto-Update staging (generated at runtime) ───────────────────────────────
 _update_staging/
 _apply_update.bat
+
+# ── Local test & plan files ──────────────────────────────────────────────────
+test_od.xlsx
+implementation_plan.md
+

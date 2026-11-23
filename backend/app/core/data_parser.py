@@ -22,7 +22,7 @@ def parse_excel_data(file_bytes: bytes, mode: str = None):
     df_main = clean_df(xl.parse("Auto_OD_input"))
     
     unresolved_commodities = []
-    if mode == "Zone assign":
+    if mode in ["Zone assign", "Place Search"]:
         from app.core.commodity_matcher import exact_match_commodity
         if 'COMMODITY_TRIP_PURPOSE' in df_main.columns:
             if 'COMMODITY_CODE_1_28' not in df_main.columns:
